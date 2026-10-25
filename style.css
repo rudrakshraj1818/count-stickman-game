@@ -4,10 +4,12 @@
     box-sizing: border-box;
 }
 
-body {
+body, #root {
     overflow: hidden;
     background: #1a1a2e;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    width: 100vw;
+    height: 100vh;
 }
 
 #game-container {
