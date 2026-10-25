@@ -1,8 +1,0 @@
-{
-  "name": "Count Masters: Stickman Games",
-  "description": "A 3D hyper-casual stickman runner game built with Three.js and React",
-  "capabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ],
-  "permissions": []
-}
