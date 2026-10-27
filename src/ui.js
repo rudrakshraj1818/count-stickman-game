@@ -494,7 +494,7 @@ export class UIManager {
             margin-bottom: 4px;
             text-shadow: 0 1px 3px rgba(0,0,0,0.5);
         `;
-        label.textContent = `👑 GIANT KING`;
+        label.textContent = `👑 TITAN OVERLORD`;
         wrapper.appendChild(label);
 
         const barBg = document.createElement('div');
