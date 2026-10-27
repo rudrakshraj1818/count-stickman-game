@@ -260,8 +260,10 @@ export class LevelGenerator {
             };
 
             // Create gate meshes
-            gate.leftMesh = this.createGateMesh(gateData.left, -2.5, z);
-            gate.rightMesh = this.createGateMesh(gateData.right, 2.5, z);
+            const leftMeshes = [];
+            gate.leftMesh = this.createGateMesh(gateData.left, -2.5, z, leftMeshes);
+            const rightMeshes = [];
+            gate.rightMesh = this.createGateMesh(gateData.right, 2.5, z, rightMeshes);
 
             // Sleek central divider pylon with neon beacon
             const divGeo = new THREE.BoxGeometry(0.3, 4.4, 0.35);
@@ -280,7 +282,22 @@ export class LevelGenerator {
             this.scene.add(divCore);
             this.meshes.push(divCore);
 
+            gate.meshes = [...leftMeshes, ...rightMeshes, divider, divCore];
             this.gates.push(gate);
+        }
+    }
+
+    removeGate(gate) {
+        if (!gate || gate.removed) return;
+        gate.removed = true;
+        gate.passed = true;
+        if (gate.meshes && gate.meshes.length > 0) {
+            gate.meshes.forEach(m => {
+                if (m) {
+                    m.visible = false;
+                    this.scene.remove(m);
+                }
+            });
         }
     }
 
@@ -307,7 +324,7 @@ export class LevelGenerator {
         };
     }
 
-    createGateMesh(gateData, x, z) {
+    createGateMesh(gateData, x, z, meshCollector = null) {
         const isGood = gateData.op === '+' || gateData.op === '*';
         const primaryColor = isGood ? 0x00E676 : 0xFF1744;
         const emissiveColor = isGood ? 0x00B0FF : 0xD50000;
@@ -425,6 +442,10 @@ export class LevelGenerator {
         label.userData.dynamic = true;
         this.scene.add(label);
         this.meshes.push(label);
+
+        if (meshCollector) {
+            meshCollector.push(pillar, beam, neonBeam, beacon, gateMesh, label);
+        }
 
         return gateMesh;
     }

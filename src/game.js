@@ -326,17 +326,16 @@ export class Game {
             const gateZ = -gate.z;
             const playerZ = -this.trackZ;
 
-            if (Math.abs(playerZ - gateZ) < 1.0) {
+            // When player's crowd touches or crosses any gate, immediately apply and remove/hide it
+            if (Math.abs(playerZ - gateZ) < 1.0 || this.trackZ >= gate.z) {
                 // Check if player is on left or right gate
                 if (this.playerX < 0 && gate.leftGate) {
                     this.applyGate(gate.leftGate);
-                    gate.passed = true;
-                    this.highlightGate(gate, 'left');
-                } else if (this.playerX >= 0 && gate.rightGate) {
+                } else if (gate.rightGate) {
                     this.applyGate(gate.rightGate);
-                    gate.passed = true;
-                    this.highlightGate(gate, 'right');
                 }
+                gate.passed = true;
+                this.levelGenerator.removeGate(gate);
             }
         }
     }
