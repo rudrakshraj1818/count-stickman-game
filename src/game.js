@@ -257,7 +257,8 @@ export class Game {
 
         if (this.state === 'fighting') {
             this.updateFight(delta);
-            this.crowdManager.update(delta);
+            this.crowdManager.update(delta, true, this.fightingEnemy, this.playerX, this.trackZ);
+            this.levelGenerator.updateEnemies(delta, true, this.fightingEnemy, this.playerX, this.trackZ, this.crowdManager);
             this.ui.updateCount(this.crowdManager.getPlayerCount());
             
             // Camera shake and zoom during fight
@@ -320,8 +321,9 @@ export class Game {
             this.checkBossFight();
         }
 
-        // Update crowd animation
-        this.crowdManager.update(delta);
+        // Update crowd and enemy animations
+        this.crowdManager.update(delta, false, null, this.playerX, this.trackZ);
+        this.levelGenerator.updateEnemies(delta, false, null, this.playerX, this.trackZ, this.crowdManager);
 
         // Update UI
         this.ui.updateCount(this.crowdManager.getPlayerCount());
@@ -434,49 +436,75 @@ export class Game {
                 this.fightingEnemy.remainingCount = enemy.count;
                 this.fightTimer = 0;
                 this.fightCameraTime = 0;
+                this.fightTickCount = 0;
                 this.speed = 0;
                 this.audio.playHit();
                 this.ui.screenShake(10);
-                // Big collision flash
-                this.crowdManager.spawnImpactFlash(
-                    new THREE.Vector3(this.playerX, 1, -this.trackZ), 0xFFFFFF
-                );
-                this.crowdManager.spawnSparks(
-                    new THREE.Vector3(this.playerX, 1, -this.trackZ), 0xFFAA00, 10
-                );
+
+                // Big opening clash flashes and slash arcs
+                const clashPos = new THREE.Vector3(this.playerX * 0.4, 0.9, -this.trackZ - 0.8);
+                this.crowdManager.spawnImpactFlash(clashPos, 0xFFFFFF);
+                this.crowdManager.spawnSlash(clashPos, null, 0x00f0ff, 1.3);
+                this.crowdManager.spawnSparks(clashPos, 0xFFAA00, 10);
                 return;
             }
         }
     }
 
     updateFight(delta) {
+        const playerCount = this.crowdManager.getPlayerCount();
+        const enemy = this.fightingEnemy;
+        if (!enemy) return;
+
+        // Ratio of player to enemy army size
+        const ratio = playerCount / Math.max(1, enemy.remainingCount);
+
+        // Dynamic combat speed: energetic rapid strikes when outnumbering opponents
+        let currentInterval = 0.12;
+        if (ratio >= 3.5) {
+            currentInterval = 0.065;
+        } else if (ratio >= 2.0) {
+            currentInterval = 0.085;
+        }
+
         this.fightTimer += delta;
 
-        if (this.fightTimer >= this.fightInterval) {
-            this.fightTimer -= this.fightInterval;
+        if (this.fightTimer >= currentInterval) {
+            this.fightTimer -= currentInterval;
+            this.fightTickCount = (this.fightTickCount || 0) + 1;
 
-            const playerCount = this.crowdManager.getPlayerCount();
-            const enemy = this.fightingEnemy;
+            const strength = this.strengthUpgrade || 1;
 
-            if (!enemy) return;
-
-            // Remove one from each side per tick
-            const strength = this.strengthUpgrade;
-
-            // Player kills enemy stickmen (strength determines how many enemy die per tick)
-            const enemyKills = Math.min(strength, enemy.remainingCount);
+            // Player kills enemy stickmen - scales up if player crowd is significantly larger
+            let killsMultiplier = 1;
+            if (ratio >= 3.5) {
+                killsMultiplier = Math.min(5, Math.ceil(ratio * 0.75));
+            } else if (ratio >= 1.8) {
+                killsMultiplier = 2;
+            }
+            const enemyKills = Math.min(strength * killsMultiplier, enemy.remainingCount);
             enemy.remainingCount -= enemyKills;
 
-            // Enemy kills one player stickman per tick
-            if (enemy.remainingCount > 0) {
-                this.crowdManager.removeFromPlayerCrowd(1);
-                // Fly-off effect for the removed stickman
-                this.crowdManager.spawnDeathEffect(this.playerX, -this.trackZ, 0x2196F3);
+            // Enemy kills player stickmen - reduced casualties when outnumbering
+            let playerTakesCasualty = true;
+            if (ratio >= 4.0) {
+                playerTakesCasualty = (this.fightTickCount % 3 === 0);
+            } else if (ratio >= 2.2) {
+                playerTakesCasualty = (this.fightTickCount % 2 === 0);
             }
 
-            // Spawn red death effect for enemy dying
+            if (enemy.remainingCount > 0 && playerTakesCasualty && playerCount > 1) {
+                this.crowdManager.removeFromPlayerCrowd(1);
+                const playerCol = (this.equippedSkin === 'rainbow') ? 0x00f0ff : this.getPlayerColor();
+                this.crowdManager.spawnDeathEffect(this.playerX, -this.trackZ, playerCol);
+            }
+
+            // Defeated enemy stickmen launch backward as ragdolls with crimson sparks
             if (enemyKills > 0) {
-                const enemyX = (Math.random() - 0.5) * 3;
+                if (!enemy.isBoss) {
+                    this.levelGenerator.removeEnemyStickman(enemy, enemyKills, this.crowdManager);
+                }
+                const enemyX = (Math.random() - 0.5) * 2;
                 this.crowdManager.spawnDeathEffect(enemyX, -enemy.z, 0xf44336);
                 this.audio.playFightHit();
             }

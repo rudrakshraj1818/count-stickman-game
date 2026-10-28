@@ -8,6 +8,8 @@ export class CrowdManager {
         this.playerGroup = null;
         this.playerCount = 0;
         this.animTime = 0;
+        this.combatTime = 0;
+        this.slashEffects = [];    // Neon sword slash arcs
         this.flyingBodies = [];    // Ragdoll stickmen flying away
         this.impactFlashes = [];   // Impact burst rings
         this.sparkParticles = [];  // Small spark particles
@@ -27,6 +29,12 @@ export class CrowdManager {
         this.playerCount = 0;
         
         // Clean up effects
+        this.slashEffects.forEach(s => { 
+            this.scene.remove(s.mesh);
+            if (s.mesh.geometry) s.mesh.geometry.dispose();
+            if (s.mesh.material) s.mesh.material.dispose();
+        });
+        this.slashEffects = [];
         this.flyingBodies.forEach(b => { this.scene.remove(b.mesh); });
         this.flyingBodies = [];
         this.impactFlashes.forEach(f => { this.scene.remove(f.mesh); });
@@ -58,14 +66,21 @@ export class CrowdManager {
         } else {
             color = this.game ? this.game.getPlayerColor() : 0x2196F3;
         }
-        const stickman = this.createStickman(color);
+        const stickman = this.createStickman(color, false);
         const pos = this.getFormationPosition(index);
         stickman.position.set(pos.x, 0, pos.z);
         stickman.userData.index = index;
+        stickman.userData.basePos = { x: pos.x, z: pos.z };
+        stickman.userData.targetCombatPos = { x: pos.x, z: pos.z };
         // Start with a pop-in scale animation
         stickman.scale.set(0, 0, 0);
         stickman.userData.spawnTime = this.animTime;
         stickman.userData.spawning = true;
+        if (!this.playerGroup) {
+            this.playerGroup = new THREE.Group();
+            this.playerGroup.userData.dynamic = true;
+            this.scene.add(this.playerGroup);
+        }
         this.playerGroup.add(stickman);
         this.playerStickmen.push(stickman);
     }
@@ -80,13 +95,166 @@ export class CrowdManager {
         };
     }
 
-    createStickman(color) {
+    createStickman(color, isEnemy = false) {
         const group = new THREE.Group();
+
+        if (isEnemy) {
+            // ============ ENEMY RIVAL RAIDER ============
+            const mat = new THREE.MeshStandardMaterial({ 
+                color: color || 0x880e4f,
+                roughness: 0.45,
+                metalness: 0.6
+            });
+            const darkArmorMat = new THREE.MeshStandardMaterial({ color: 0x181a24, roughness: 0.5, metalness: 0.8 });
+            const evilGlowMat = new THREE.MeshStandardMaterial({
+                color: 0xff1744,
+                emissive: 0xff1744,
+                emissiveIntensity: 1.1
+            });
+
+            // 1. Armored Body
+            const bodyGeo = new THREE.CapsuleGeometry(0.16, 0.48, 6, 6);
+            const body = new THREE.Mesh(bodyGeo, mat);
+            body.position.y = 0.7;
+            body.castShadow = true;
+
+            // Spiked Pauldrons
+            const spikeGeo = new THREE.ConeGeometry(0.06, 0.18, 4);
+            const leftSpike = new THREE.Mesh(spikeGeo, darkArmorMat);
+            leftSpike.position.set(-0.2, 0.22, 0);
+            leftSpike.rotation.z = 0.5;
+            body.add(leftSpike);
+
+            const rightSpike = new THREE.Mesh(spikeGeo, darkArmorMat);
+            rightSpike.position.set(0.2, 0.22, 0);
+            rightSpike.rotation.z = -0.5;
+            body.add(rightSpike);
+
+            // Glowing Evil Chest Core
+            const coreGeo = new THREE.BoxGeometry(0.12, 0.16, 0.08);
+            const core = new THREE.Mesh(coreGeo, evilGlowMat);
+            core.position.set(0, 0.04, 0.12);
+            body.add(core);
+            group.add(body);
+
+            // 2. Horned Raider Helmet
+            const headGeo = new THREE.SphereGeometry(0.22, 10, 10);
+            const head = new THREE.Mesh(headGeo, mat);
+            head.position.y = 1.22;
+            head.castShadow = true;
+
+            // Evil Horns
+            const hornGeo = new THREE.ConeGeometry(0.05, 0.22, 4);
+            const leftHorn = new THREE.Mesh(hornGeo, darkArmorMat);
+            leftHorn.position.set(-0.14, 0.18, -0.04);
+            leftHorn.rotation.z = 0.4;
+            leftHorn.rotation.x = -0.2;
+            head.add(leftHorn);
+
+            const rightHorn = new THREE.Mesh(hornGeo, darkArmorMat);
+            rightHorn.position.set(0.14, 0.18, -0.04);
+            rightHorn.rotation.z = -0.4;
+            rightHorn.rotation.x = -0.2;
+            head.add(rightHorn);
+
+            // Fiery Slit Visor
+            const visorGeo = new THREE.BoxGeometry(0.28, 0.07, 0.14);
+            const visor = new THREE.Mesh(visorGeo, evilGlowMat);
+            visor.position.set(0, 0.02, 0.12);
+            head.add(visor);
+            group.add(head);
+
+            // 3. Heavy Armored Legs
+            const legGeo = new THREE.CapsuleGeometry(0.07, 0.3, 4, 4);
+            const leftLeg = new THREE.Mesh(legGeo, mat);
+            leftLeg.position.set(-0.1, 0.2, 0);
+            const leftBoot = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.08, 0.17), darkArmorMat);
+            leftBoot.position.set(0, -0.15, 0.04);
+            leftLeg.add(leftBoot);
+            group.add(leftLeg);
+
+            const rightLeg = new THREE.Mesh(legGeo, mat);
+            rightLeg.position.set(0.1, 0.2, 0);
+            const rightBoot = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.08, 0.17), darkArmorMat);
+            rightBoot.position.set(0, -0.15, 0.04);
+            rightLeg.add(rightBoot);
+            group.add(rightLeg);
+
+            // 4. Left Arm & Spiked War Buckler
+            const armGeo = new THREE.CapsuleGeometry(0.055, 0.25, 4, 4);
+            const leftArm = new THREE.Mesh(armGeo, mat);
+            leftArm.position.set(-0.25, 0.75, 0);
+            leftArm.rotation.z = 0.3;
+
+            // Spiked Buckler
+            const shieldGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.04, 6);
+            const shield = new THREE.Mesh(shieldGeo, darkArmorMat);
+            shield.position.set(-0.06, -0.06, 0.08);
+            shield.rotation.y = Math.PI / 2;
+            const shieldSpike = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.14, 4), evilGlowMat);
+            shieldSpike.position.set(0, 0.08, 0);
+            shieldSpike.rotation.x = Math.PI / 2;
+            shield.add(shieldSpike);
+            leftArm.add(shield);
+            group.add(leftArm);
+
+            // 5. Right Arm & Brutal Jagged Raider Cleaver / Axe
+            const rightArm = new THREE.Mesh(armGeo, mat);
+            rightArm.position.set(0.25, 0.75, 0);
+            rightArm.rotation.z = -0.3;
+
+            // Weapon handle
+            const axeGroup = new THREE.Group();
+            const handleGeo = new THREE.CylinderGeometry(0.025, 0.025, 0.38, 5);
+            const handle = new THREE.Mesh(handleGeo, darkArmorMat);
+            axeGroup.add(handle);
+
+            // Jagged axe blade
+            const bladeGeo = new THREE.BoxGeometry(0.18, 0.22, 0.03);
+            const blade = new THREE.Mesh(bladeGeo, darkArmorMat);
+            blade.position.set(0.1, 0.12, 0);
+            axeGroup.add(blade);
+
+            // Red glowing cutting edge
+            const edgeGeo = new THREE.BoxGeometry(0.04, 0.24, 0.04);
+            const edge = new THREE.Mesh(edgeGeo, evilGlowMat);
+            edge.position.set(0.19, 0.12, 0);
+            axeGroup.add(edge);
+
+            axeGroup.position.set(0.04, -0.12, 0.12);
+            axeGroup.rotation.x = Math.PI / 3;
+            rightArm.add(axeGroup);
+            group.add(rightArm);
+
+            // Store part references
+            group.userData.body = body;
+            group.userData.head = head;
+            group.userData.leftLeg = leftLeg;
+            group.userData.rightLeg = rightLeg;
+            group.userData.leftArm = leftArm;
+            group.userData.rightArm = rightArm;
+            group.userData.weapon = axeGroup;
+            group.userData.shield = shield;
+            group.userData.isEnemy = true;
+            group.userData.hitReact = 0;
+
+            return group;
+        }
+
+        // ============ FRIENDLY CHAMPION RUNNER ============
         const mat = new THREE.MeshStandardMaterial({ 
             color,
             roughness: 0.35,
-            metalness: 0.2
+            metalness: 0.25
         });
+        const whiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
+        const cyanGlowMat = new THREE.MeshStandardMaterial({
+            color: 0x00f0ff,
+            emissive: 0x00f0ff,
+            emissiveIntensity: 0.95,
+            roughness: 0.1
+        });
+        const darkArmorMat = new THREE.MeshStandardMaterial({ color: 0x1b2838, roughness: 0.4, metalness: 0.7 });
 
         // 1. Body (child 0)
         const bodyGeo = new THREE.CapsuleGeometry(0.16, 0.48, 6, 6);
@@ -94,39 +262,35 @@ export class CrowdManager {
         body.position.y = 0.7;
         body.castShadow = true;
 
-        // Runner chest energy core (attached to body)
+        // Runner chest energy core
         const coreGeo = new THREE.BoxGeometry(0.14, 0.18, 0.08);
-        const coreMat = new THREE.MeshStandardMaterial({
-            color: 0xffffff,
-            emissive: 0x00f0ff,
-            emissiveIntensity: 0.8,
-            roughness: 0.2
-        });
-        const core = new THREE.Mesh(coreGeo, coreMat);
+        const core = new THREE.Mesh(coreGeo, cyanGlowMat);
         core.position.set(0, 0.05, 0.12);
         body.add(core);
 
-        // Runner jetpack/booster (attached to body back)
+        // Hero Aerodynamic Shoulder Armor Guards
+        const shoulderGeo = new THREE.SphereGeometry(0.08, 6, 6);
+        const leftShoulder = new THREE.Mesh(shoulderGeo, whiteMat);
+        leftShoulder.position.set(-0.2, 0.22, 0);
+        leftShoulder.scale.set(1.2, 0.8, 1);
+        body.add(leftShoulder);
+
+        const rightShoulder = new THREE.Mesh(shoulderGeo, whiteMat);
+        rightShoulder.position.set(0.2, 0.22, 0);
+        rightShoulder.scale.set(1.2, 0.8, 1);
+        body.add(rightShoulder);
+
+        // Runner booster / jetpack
         const packGeo = new THREE.BoxGeometry(0.2, 0.24, 0.1);
-        const packMat = new THREE.MeshStandardMaterial({
-            color: 0x1b2838,
-            roughness: 0.4,
-            metalness: 0.7
-        });
-        const pack = new THREE.Mesh(packGeo, packMat);
+        const pack = new THREE.Mesh(packGeo, darkArmorMat);
         pack.position.set(0, 0.05, -0.12);
 
-        // Twin thruster nozzles on pack
+        // Twin nozzles
         const nozzleGeo = new THREE.CylinderGeometry(0.035, 0.045, 0.07, 6);
-        const nozzleMat = new THREE.MeshStandardMaterial({
-            color: 0x00f0ff,
-            emissive: 0x00f0ff,
-            emissiveIntensity: 0.9
-        });
-        const nozzleL = new THREE.Mesh(nozzleGeo, nozzleMat);
+        const nozzleL = new THREE.Mesh(nozzleGeo, cyanGlowMat);
         nozzleL.position.set(-0.06, -0.13, 0);
         pack.add(nozzleL);
-        const nozzleR = new THREE.Mesh(nozzleGeo, nozzleMat);
+        const nozzleR = new THREE.Mesh(nozzleGeo, cyanGlowMat);
         nozzleR.position.set(0.06, -0.13, 0);
         pack.add(nozzleR);
         body.add(pack);
@@ -139,12 +303,12 @@ export class CrowdManager {
         head.position.y = 1.22;
         head.castShadow = true;
 
-        // Sleek aerodynamic arcade cyber-visor (attached to head)
+        // Sleek aerodynamic cyber-visor
         const visorGeo = new THREE.BoxGeometry(0.3, 0.1, 0.16);
         const visorMat = new THREE.MeshStandardMaterial({
             color: 0x0d1b2a,
             emissive: 0x00e5ff,
-            emissiveIntensity: 0.8,
+            emissiveIntensity: 0.85,
             roughness: 0.1,
             metalness: 0.8
         });
@@ -152,24 +316,15 @@ export class CrowdManager {
         visor.position.set(0, 0.02, 0.12);
         head.add(visor);
 
-        // Sporty headband / aero fin across the head
+        // Champion headband
         const bandGeo = new THREE.CylinderGeometry(0.23, 0.23, 0.05, 12, 1, true);
-        const bandMat = new THREE.MeshStandardMaterial({
-            color: 0xffffff,
-            roughness: 0.3
-        });
-        const band = new THREE.Mesh(bandGeo, bandMat);
+        const band = new THREE.Mesh(bandGeo, whiteMat);
         band.position.set(0, 0.05, 0);
         head.add(band);
 
-        // Top aero crest
+        // Hero crest
         const crestGeo = new THREE.BoxGeometry(0.04, 0.1, 0.16);
-        const crestMat = new THREE.MeshStandardMaterial({
-            color: 0x00f0ff,
-            emissive: 0x00f0ff,
-            emissiveIntensity: 0.5
-        });
-        const crest = new THREE.Mesh(crestGeo, crestMat);
+        const crest = new THREE.Mesh(crestGeo, cyanGlowMat);
         crest.position.set(0, 0.2, -0.04);
         head.add(crest);
 
@@ -180,45 +335,98 @@ export class CrowdManager {
         const leftLeg = new THREE.Mesh(legGeo, mat);
         leftLeg.position.set(-0.1, 0.2, 0);
 
-        // Runner sneaker
         const shoeGeo = new THREE.BoxGeometry(0.1, 0.08, 0.17);
-        const shoeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
-        const leftShoe = new THREE.Mesh(shoeGeo, shoeMat);
+        const leftShoe = new THREE.Mesh(shoeGeo, whiteMat);
         leftShoe.position.set(0, -0.15, 0.04);
         leftLeg.add(leftShoe);
-
         group.add(leftLeg); // children[2]
 
         // 4. Right Leg (child 3)
         const rightLeg = new THREE.Mesh(legGeo, mat);
         rightLeg.position.set(0.1, 0.2, 0);
 
-        const rightShoe = new THREE.Mesh(shoeGeo, shoeMat);
+        const rightShoe = new THREE.Mesh(shoeGeo, whiteMat);
         rightShoe.position.set(0, -0.15, 0.04);
         rightLeg.add(rightShoe);
-
         group.add(rightLeg); // children[3]
 
-        // 5. Left Arm (child 4)
+        // 5. Left Arm (child 4) & Hero Buckler Shield
         const armGeo = new THREE.CapsuleGeometry(0.05, 0.25, 4, 4);
         const leftArm = new THREE.Mesh(armGeo, mat);
         leftArm.position.set(-0.25, 0.75, 0);
         leftArm.rotation.z = 0.3;
+
         const cuffGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.07, 6);
-        const cuffMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
-        const leftCuff = new THREE.Mesh(cuffGeo, cuffMat);
+        const leftCuff = new THREE.Mesh(cuffGeo, whiteMat);
         leftCuff.position.set(0, -0.09, 0);
         leftArm.add(leftCuff);
+
+        // Hero Buckler Shield
+        const shieldGroup = new THREE.Group();
+        const shieldBaseGeo = new THREE.CylinderGeometry(0.18, 0.18, 0.04, 8);
+        const shieldBase = new THREE.Mesh(shieldBaseGeo, whiteMat);
+        shieldBase.rotation.x = Math.PI / 2;
+        shieldGroup.add(shieldBase);
+
+        const shieldRimGeo = new THREE.TorusGeometry(0.18, 0.025, 6, 12);
+        const shieldRim = new THREE.Mesh(shieldRimGeo, cyanGlowMat);
+        shieldGroup.add(shieldRim);
+
+        const shieldBossGeo = new THREE.SphereGeometry(0.05, 6, 6);
+        const shieldBoss = new THREE.Mesh(shieldBossGeo, cyanGlowMat);
+        shieldBoss.position.z = 0.03;
+        shieldGroup.add(shieldBoss);
+
+        shieldGroup.position.set(-0.08, -0.05, 0.08);
+        shieldGroup.rotation.y = Math.PI / 2;
+        leftArm.add(shieldGroup);
         group.add(leftArm); // children[4]
 
-        // 6. Right Arm (child 5)
+        // 6. Right Arm (child 5) & Glowing Cyber Energy Blade
         const rightArm = new THREE.Mesh(armGeo, mat);
         rightArm.position.set(0.25, 0.75, 0);
         rightArm.rotation.z = -0.3;
-        const rightCuff = new THREE.Mesh(cuffGeo, cuffMat);
+
+        const rightCuff = new THREE.Mesh(cuffGeo, whiteMat);
         rightCuff.position.set(0, -0.09, 0);
         rightArm.add(rightCuff);
+
+        // Cyber Energy Sword
+        const swordGroup = new THREE.Group();
+        
+        // Hilt grip
+        const swordHiltGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.12, 5);
+        const swordHilt = new THREE.Mesh(swordHiltGeo, darkArmorMat);
+        swordGroup.add(swordHilt);
+
+        // Crossguard
+        const swordGuardGeo = new THREE.BoxGeometry(0.12, 0.025, 0.04);
+        const swordGuard = new THREE.Mesh(swordGuardGeo, whiteMat);
+        swordGuard.position.y = 0.06;
+        swordGroup.add(swordGuard);
+
+        // Glowing Energy Blade
+        const swordBladeGeo = new THREE.BoxGeometry(0.055, 0.42, 0.015);
+        const swordBlade = new THREE.Mesh(swordBladeGeo, cyanGlowMat);
+        swordBlade.position.y = 0.28;
+        swordGroup.add(swordBlade);
+
+        swordGroup.position.set(0.04, -0.12, 0.12);
+        swordGroup.rotation.x = Math.PI / 3;
+        rightArm.add(swordGroup);
         group.add(rightArm); // children[5]
+
+        // Store part references
+        group.userData.body = body;
+        group.userData.head = head;
+        group.userData.leftLeg = leftLeg;
+        group.userData.rightLeg = rightLeg;
+        group.userData.leftArm = leftArm;
+        group.userData.rightArm = rightArm;
+        group.userData.sword = swordGroup;
+        group.userData.shield = shieldGroup;
+        group.userData.isEnemy = false;
+        group.userData.hitReact = 0;
 
         return group;
     }
@@ -248,7 +456,9 @@ export class CrowdManager {
                     ragdollColor = this.game ? this.game.getPlayerColor() : 0x2196F3;
                 }
                 this.launchRagdoll(stickman, ragdollColor);
-                this.playerGroup.remove(stickman);
+                if (this.playerGroup) {
+                    this.playerGroup.remove(stickman);
+                }
             }
         }
         this.playerCount = Math.max(1, this.playerCount - amount);
@@ -279,8 +489,9 @@ export class CrowdManager {
         const worldPos = new THREE.Vector3();
         stickman.getWorldPosition(worldPos);
 
-        // Create a simplified ragdoll body
-        const ragdoll = this.createStickman(color);
+        // Check if enemy or friendly
+        const isEnemy = stickman.userData && stickman.userData.isEnemy === true;
+        const ragdoll = this.createStickman(color, isEnemy);
         ragdoll.position.copy(worldPos);
         ragdoll.userData.dynamic = true;
 
@@ -320,6 +531,61 @@ export class CrowdManager {
 
         // Spawn burst sparks
         this.spawnSparks(worldPos, color, 5);
+    }
+
+    // ============ NEON SWORD SLASH EFFECT ============
+    spawnSlash(position, rotation, color = 0x00f0ff, scale = 1) {
+        if (this.slashEffects.length >= 6) {
+            const oldest = this.slashEffects.shift();
+            this.scene.remove(oldest.mesh);
+            if (oldest.mesh.geometry) oldest.mesh.geometry.dispose();
+            if (oldest.mesh.material) oldest.mesh.material.dispose();
+        }
+
+        const arcGeo = new THREE.RingGeometry(0.24 * scale, 0.46 * scale, 12, 1, 0, Math.PI * 0.7);
+        const arcMat = new THREE.MeshBasicMaterial({
+            color: color,
+            transparent: true,
+            opacity: 0.95,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending
+        });
+        const slash = new THREE.Mesh(arcGeo, arcMat);
+        slash.position.copy(position);
+        if (rotation) {
+            slash.rotation.copy(rotation);
+        } else {
+            slash.rotation.x = -Math.PI / 3;
+            slash.rotation.y = (Math.random() - 0.5) * 0.4;
+            slash.rotation.z = (Math.random() - 0.5) * 0.4;
+        }
+        slash.userData.dynamic = true;
+        this.scene.add(slash);
+        this.slashEffects.push({
+            mesh: slash,
+            life: 0.13,
+            maxLife: 0.13
+        });
+    }
+
+    updateSlashEffects(delta) {
+        for (let i = this.slashEffects.length - 1; i >= 0; i--) {
+            const effect = this.slashEffects[i];
+            effect.life -= delta;
+            const progress = 1 - (effect.life / effect.maxLife);
+            
+            const s = 1 + progress * 0.5;
+            effect.mesh.scale.set(s, s, s);
+            effect.mesh.material.opacity = Math.max(0, (1 - progress) * 0.95);
+
+            if (effect.life <= 0) {
+                this.scene.remove(effect.mesh);
+                effect.mesh.geometry.dispose();
+                effect.mesh.material.dispose();
+                this.slashEffects.splice(i, 1);
+            }
+        }
     }
 
     // ============ IMPACT FLASH (expanding ring) ============
@@ -413,11 +679,18 @@ export class CrowdManager {
         }
     }
 
-    update(delta) {
+    update(delta, isFighting = false, fightingEnemy = null, playerX = 0, trackZ = 0) {
         this.animTime += delta * 5; // Slower animation cycle
+        if (isFighting) {
+            this.combatTime += delta;
+        } else {
+            this.combatTime = 0;
+        }
         
-        // Animate stickmen running
+        // Animate stickmen
         if (this.playerStickmen.length > 0) {
+            const frontlineCount = Math.min(10, Math.max(3, Math.floor(this.playerStickmen.length * 0.45)));
+
             this.playerStickmen.forEach((stickman, i) => {
                 // Spawn pop-in animation
                 if (stickman.userData.spawning) {
@@ -435,41 +708,138 @@ export class CrowdManager {
                     }
                 }
 
-                const offset = i * 0.7;
-                const walkCycle = this.animTime + offset;
-                
-                // Bobbing motion - more pronounced up/down
-                if (!stickman.userData.spawning) {
-                    stickman.position.y = Math.abs(Math.sin(walkCycle * 2)) * 0.25;
-                }
-                
-                // Body lean forward while running
                 const children = stickman.children;
-                // Body tilt (children[0] = body)
-                if (children.length >= 1) {
-                    children[0].rotation.x = 0.15 + Math.sin(walkCycle) * 0.05;
-                }
-                // Head bob (children[1] = head)
-                if (children.length >= 2) {
-                    children[1].rotation.x = Math.sin(walkCycle * 2) * 0.08;
-                }
-                
-                // Leg animation - much larger swing
-                if (children.length >= 4) {
-                    children[2].rotation.x = Math.sin(walkCycle) * 0.8; // left leg big swing
-                    children[3].rotation.x = -Math.sin(walkCycle) * 0.8; // right leg big swing
-                }
-                // Arm animation - opposite to legs, big swing
-                if (children.length >= 6) {
-                    children[4].rotation.x = -Math.sin(walkCycle) * 0.7; // left arm
-                    children[4].rotation.z = 0.3 + Math.sin(walkCycle * 2) * 0.1;
-                    children[5].rotation.x = Math.sin(walkCycle) * 0.7; // right arm
-                    children[5].rotation.z = -0.3 - Math.sin(walkCycle * 2) * 0.1;
+                const baseZ = stickman.userData.basePos ? stickman.userData.basePos.z : 0;
+                const baseX = stickman.userData.basePos ? stickman.userData.basePos.x : 0;
+
+                if (isFighting && fightingEnemy) {
+                    // ============ COMBAT ENGAGEMENT ANIMATION ============
+                    const isFrontline = i < frontlineCount;
+
+                    if (isFrontline) {
+                        // Frontline fighters push forward towards the clash zone
+                        const targetZ = baseZ - 1.1;
+                        stickman.position.z += (targetZ - stickman.position.z) * Math.min(1, delta * 8);
+
+                        // Athletic fighting stance shuffle
+                        stickman.position.y = 0.05 + Math.sin(this.combatTime * 14 + i) * 0.04;
+
+                        // Braced legs
+                        if (children.length >= 4) {
+                            children[2].rotation.x = -0.35 + Math.sin(this.combatTime * 8 + i) * 0.15;
+                            children[3].rotation.x = 0.35 - Math.sin(this.combatTime * 8 + i) * 0.15;
+                        }
+
+                        // Guard stance: Left arm with shield raised to block
+                        if (children.length >= 5) {
+                            children[4].rotation.x = -0.75 + Math.sin(this.combatTime * 8 + i) * 0.15;
+                            children[4].rotation.y = 0.35;
+                            children[4].rotation.z = 0.4;
+                        }
+
+                        // Fast, snappy sword slash attacks
+                        const attackSpeed = 13;
+                        const attackPhase = (this.combatTime * attackSpeed + i * 1.6) % (Math.PI * 2);
+                        if (children.length >= 6) {
+                            children[5].rotation.x = Math.sin(attackPhase) * 1.2 - 0.2;
+                            children[5].rotation.y = -Math.cos(attackPhase) * 0.35;
+                            children[5].rotation.z = -0.25;
+                        }
+
+                        // Lunge forward into slash
+                        if (children.length >= 1) {
+                            children[0].rotation.x = 0.22 + Math.sin(attackPhase) * 0.12;
+                            children[0].rotation.y = Math.sin(attackPhase) * 0.15;
+                        }
+                        if (children.length >= 2) {
+                            children[1].rotation.x = 0.1 + Math.sin(attackPhase) * 0.08;
+                        }
+
+                        // Spawn neon slash arc and light sparks near apex of sword swing
+                        if (attackPhase > 1.7 && attackPhase < 2.1 && Math.random() < 0.25) {
+                            const worldPos = new THREE.Vector3();
+                            stickman.getWorldPosition(worldPos);
+                            worldPos.y += 0.8;
+                            worldPos.z -= 0.35;
+                            worldPos.x += (Math.random() - 0.5) * 0.3;
+                            this.spawnSlash(worldPos, null, 0x00f0ff, 1.0);
+                            if (Math.random() < 0.35) {
+                                this.spawnSparks(worldPos, 0x00f0ff, 2);
+                            }
+                        }
+                    } else {
+                        // Reserve / rear fighters cheer and press forward
+                        const targetZ = baseZ - 0.5;
+                        stickman.position.z += (targetZ - stickman.position.z) * Math.min(1, delta * 6);
+                        stickman.position.y = Math.abs(Math.sin(this.combatTime * 9 + i * 0.5)) * 0.18;
+
+                        // Raised arms cheering / rallying
+                        if (children.length >= 5) {
+                            children[4].rotation.x = -1.1 + Math.cos(this.combatTime * 10 + i) * 0.3;
+                            children[4].rotation.z = 0.5;
+                        }
+                        if (children.length >= 6) {
+                            children[5].rotation.x = -1.3 + Math.sin(this.combatTime * 11 + i) * 0.4;
+                            children[5].rotation.z = -0.4;
+                        }
+                        if (children.length >= 1) {
+                            children[0].rotation.x = 0.08;
+                            children[0].rotation.y = 0;
+                        }
+                    }
+
+                    // Hit reaction flinch
+                    if (stickman.userData.hitReact > 0) {
+                        stickman.userData.hitReact = Math.max(0, stickman.userData.hitReact - delta * 4);
+                        if (children.length >= 1) {
+                            children[0].rotation.x -= 0.35 * stickman.userData.hitReact;
+                        }
+                        stickman.position.z += 0.12 * stickman.userData.hitReact;
+                    }
+                } else {
+                    // ============ NORMAL RUNNING ANIMATION ============
+                    // Smoothly restore base position
+                    stickman.position.z += (baseZ - stickman.position.z) * Math.min(1, delta * 6);
+                    stickman.position.x += (baseX - stickman.position.x) * Math.min(1, delta * 6);
+
+                    const offset = i * 0.7;
+                    const walkCycle = this.animTime + offset;
+                    
+                    // Bobbing motion - more pronounced up/down
+                    if (!stickman.userData.spawning) {
+                        stickman.position.y = Math.abs(Math.sin(walkCycle * 2)) * 0.25;
+                    }
+                    
+                    // Body lean forward while running
+                    if (children.length >= 1) {
+                        children[0].rotation.x = 0.15 + Math.sin(walkCycle) * 0.05;
+                        children[0].rotation.y = 0;
+                    }
+                    // Head bob
+                    if (children.length >= 2) {
+                        children[1].rotation.x = Math.sin(walkCycle * 2) * 0.08;
+                    }
+                    
+                    // Leg animation - runner stride
+                    if (children.length >= 4) {
+                        children[2].rotation.x = Math.sin(walkCycle) * 0.8;
+                        children[3].rotation.x = -Math.sin(walkCycle) * 0.8;
+                    }
+                    // Arm animation - running swing with weapons in hand
+                    if (children.length >= 6) {
+                        children[4].rotation.x = -Math.sin(walkCycle) * 0.7;
+                        children[4].rotation.y = 0;
+                        children[4].rotation.z = 0.3 + Math.sin(walkCycle * 2) * 0.1;
+                        children[5].rotation.x = Math.sin(walkCycle) * 0.7;
+                        children[5].rotation.y = 0;
+                        children[5].rotation.z = -0.3 - Math.sin(walkCycle * 2) * 0.1;
+                    }
                 }
             });
         }
 
         // Update all effects
+        this.updateSlashEffects(delta);
         this.updateFlyingBodies(delta);
         this.updateImpactFlashes(delta);
         this.updateSparkParticles(delta);

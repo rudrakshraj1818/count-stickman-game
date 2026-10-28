@@ -647,6 +647,8 @@ export class LevelGenerator {
                 0,
                 Math.sin(angle) * radius * 0.5
             );
+            stickman.userData.index = i;
+            stickman.userData.basePos = { x: stickman.position.x, z: stickman.position.z };
             group.add(stickman);
         }
 
@@ -722,11 +724,115 @@ export class LevelGenerator {
         }
         enemy.labelMesh.material.map = new THREE.CanvasTexture(canvas);
         enemy.labelMesh.material.needsUpdate = true;
+    }
 
-        // Remove stickmen from the enemy group visually
-        if (enemy.meshGroup && enemy.meshGroup.children.length > 0) {
-            const child = enemy.meshGroup.children[enemy.meshGroup.children.length - 1];
-            enemy.meshGroup.remove(child);
+    removeEnemyStickman(enemy, count = 1, crowdManager = null) {
+        if (!enemy.meshGroup) return;
+        const toRemove = Math.min(count, enemy.meshGroup.children.length);
+        for (let i = 0; i < toRemove; i++) {
+            if (enemy.meshGroup.children.length > 0) {
+                const child = enemy.meshGroup.children[enemy.meshGroup.children.length - 1];
+                if (crowdManager) {
+                    crowdManager.launchRagdoll(child, 0x880e4f, enemy.meshGroup);
+                }
+                enemy.meshGroup.remove(child);
+            }
+        }
+    }
+
+    updateEnemies(delta, isFighting = false, fightingEnemy = null, playerX = 0, trackZ = 0, crowdManager = null) {
+        this.enemyAnimTime = (this.enemyAnimTime || 0) + delta;
+
+        // If currently in a crowd fight, animate the active enemy horde
+        if (isFighting && fightingEnemy && fightingEnemy.meshGroup) {
+            this.enemyCombatTime = (this.enemyCombatTime || 0) + delta;
+            const enemyChildren = fightingEnemy.meshGroup.children;
+            const frontlineCount = Math.min(8, Math.max(2, Math.floor(enemyChildren.length * 0.4)));
+
+            enemyChildren.forEach((stickman, i) => {
+                const children = stickman.children;
+                const baseZ = stickman.userData.basePos ? stickman.userData.basePos.z : 0;
+                const isFrontline = i < frontlineCount;
+
+                if (isFrontline) {
+                    // Surge forward toward player (positive Z in enemy local space)
+                    const targetZ = baseZ + 1.1;
+                    stickman.position.z += (targetZ - stickman.position.z) * Math.min(1, delta * 8);
+
+                    // Aggressive battle stance shuffle
+                    stickman.position.y = 0.05 + Math.sin(this.enemyCombatTime * 14 + i) * 0.04;
+
+                    // Braced combat legs
+                    if (children.length >= 4) {
+                        children[2].rotation.x = 0.35 - Math.sin(this.enemyCombatTime * 8 + i) * 0.15;
+                        children[3].rotation.x = -0.35 + Math.sin(this.enemyCombatTime * 8 + i) * 0.15;
+                    }
+
+                    // Left arm raises spiked shield forward to block
+                    if (children.length >= 5) {
+                        children[4].rotation.x = -0.7 + Math.sin(this.enemyCombatTime * 8 + i) * 0.15;
+                        children[4].rotation.y = -0.3;
+                        children[4].rotation.z = -0.4;
+                    }
+
+                    // Right arm chops down furiously with jagged cleaver/axe
+                    const attackSpeed = 12.5;
+                    const attackPhase = (this.enemyCombatTime * attackSpeed + i * 1.8 + Math.PI) % (Math.PI * 2);
+                    if (children.length >= 6) {
+                        children[5].rotation.x = Math.sin(attackPhase) * 1.25 - 0.2;
+                        children[5].rotation.y = Math.cos(attackPhase) * 0.35;
+                        children[5].rotation.z = 0.25;
+                    }
+
+                    // Heavy chopping lunge
+                    if (children.length >= 1) {
+                        children[0].rotation.x = -0.22 - Math.sin(attackPhase) * 0.12;
+                        children[0].rotation.y = -Math.sin(attackPhase) * 0.15;
+                    }
+                    if (children.length >= 2) {
+                        children[1].rotation.x = -0.1 - Math.sin(attackPhase) * 0.08;
+                    }
+
+                    // Occasional fiery red slash arc on enemy strike apex
+                    if (attackPhase > 1.7 && attackPhase < 2.1 && Math.random() < 0.2 && crowdManager) {
+                        const worldPos = new THREE.Vector3();
+                        stickman.getWorldPosition(worldPos);
+                        worldPos.y += 0.8;
+                        worldPos.z += 0.35;
+                        worldPos.x += (Math.random() - 0.5) * 0.3;
+                        crowdManager.spawnSlash(worldPos, null, 0xff1744, 0.95);
+                    }
+                } else {
+                    // Rear enemy ranks roar and push forward
+                    const targetZ = baseZ + 0.5;
+                    stickman.position.z += (targetZ - stickman.position.z) * Math.min(1, delta * 6);
+                    stickman.position.y = Math.abs(Math.sin(this.enemyCombatTime * 8 + i * 0.5)) * 0.18;
+
+                    // Arms brandishing weapons high
+                    if (children.length >= 5) {
+                        children[4].rotation.x = -1.1 + Math.sin(this.enemyCombatTime * 9 + i) * 0.3;
+                        children[4].rotation.z = -0.5;
+                    }
+                    if (children.length >= 6) {
+                        children[5].rotation.x = -1.2 + Math.cos(this.enemyCombatTime * 10 + i) * 0.4;
+                        children[5].rotation.z = 0.4;
+                    }
+                }
+            });
+        } else {
+            this.enemyCombatTime = 0;
+            // Idle breathing for all active enemy groups along the track
+            for (const enemy of this.enemies) {
+                if (enemy.defeated || !enemy.meshGroup) continue;
+                enemy.meshGroup.children.forEach((stickman, i) => {
+                    const idlePhase = this.enemyAnimTime * 2.5 + i * 0.4;
+                    stickman.position.y = Math.abs(Math.sin(idlePhase)) * 0.06;
+                    const children = stickman.children;
+                    if (children.length >= 1) {
+                        children[0].rotation.y = Math.sin(idlePhase) * 0.08;
+                    }
+                });
+            }
         }
     }
 
@@ -1483,6 +1589,7 @@ export class LevelGenerator {
             roughness: 0.4,
             metalness: 0.7
         });
+        const darkArmorMat = new THREE.MeshStandardMaterial({ color: 0x181a24, roughness: 0.5, metalness: 0.8 });
 
         // 1. Armored Body
         const bodyGeo = new THREE.CapsuleGeometry(0.16, 0.48, 6, 6);
@@ -1544,14 +1651,79 @@ export class LevelGenerator {
 
         group.add(head);
 
-        // 3. Legs
+        // 3. Heavy Armored Legs
         const legGeo = new THREE.CapsuleGeometry(0.07, 0.3, 4, 4);
         const leftLeg = new THREE.Mesh(legGeo, mat);
         leftLeg.position.set(-0.1, 0.2, 0);
+        const leftBoot = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.08, 0.17), darkArmorMat);
+        leftBoot.position.set(0, -0.15, 0.04);
+        leftLeg.add(leftBoot);
         group.add(leftLeg);
+
         const rightLeg = new THREE.Mesh(legGeo, mat);
         rightLeg.position.set(0.1, 0.2, 0);
+        const rightBoot = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.08, 0.17), darkArmorMat);
+        rightBoot.position.set(0, -0.15, 0.04);
+        rightLeg.add(rightBoot);
         group.add(rightLeg);
+
+        // 4. Left Arm & Spiked War Buckler
+        const armGeo = new THREE.CapsuleGeometry(0.055, 0.25, 4, 4);
+        const leftArm = new THREE.Mesh(armGeo, mat);
+        leftArm.position.set(-0.25, 0.75, 0);
+        leftArm.rotation.z = 0.3;
+
+        // Spiked Buckler
+        const shieldGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.04, 6);
+        const shield = new THREE.Mesh(shieldGeo, darkArmorMat);
+        shield.position.set(-0.06, -0.06, 0.08);
+        shield.rotation.y = Math.PI / 2;
+        const shieldSpike = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.14, 4), coreMat);
+        shieldSpike.position.set(0, 0.08, 0);
+        shieldSpike.rotation.x = Math.PI / 2;
+        shield.add(shieldSpike);
+        leftArm.add(shield);
+        group.add(leftArm);
+
+        // 5. Right Arm & Brutal Jagged Raider Cleaver / Axe
+        const rightArm = new THREE.Mesh(armGeo, mat);
+        rightArm.position.set(0.25, 0.75, 0);
+        rightArm.rotation.z = -0.3;
+
+        // Weapon handle
+        const axeGroup = new THREE.Group();
+        const handleGeo = new THREE.CylinderGeometry(0.025, 0.025, 0.38, 5);
+        const handle = new THREE.Mesh(handleGeo, darkArmorMat);
+        axeGroup.add(handle);
+
+        // Jagged axe blade
+        const bladeGeo = new THREE.BoxGeometry(0.18, 0.22, 0.03);
+        const blade = new THREE.Mesh(bladeGeo, darkArmorMat);
+        blade.position.set(0.1, 0.12, 0);
+        axeGroup.add(blade);
+
+        // Red glowing cutting edge
+        const edgeGeo = new THREE.BoxGeometry(0.04, 0.24, 0.04);
+        const edge = new THREE.Mesh(edgeGeo, coreMat);
+        edge.position.set(0.19, 0.12, 0);
+        axeGroup.add(edge);
+
+        axeGroup.position.set(0.04, -0.12, 0.12);
+        axeGroup.rotation.x = Math.PI / 3;
+        rightArm.add(axeGroup);
+        group.add(rightArm);
+
+        // Store part references
+        group.userData.body = body;
+        group.userData.head = head;
+        group.userData.leftLeg = leftLeg;
+        group.userData.rightLeg = rightLeg;
+        group.userData.leftArm = leftArm;
+        group.userData.rightArm = rightArm;
+        group.userData.weapon = axeGroup;
+        group.userData.shield = shield;
+        group.userData.isEnemy = true;
+        group.userData.hitReact = 0;
 
         return group;
     }
