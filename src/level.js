@@ -347,72 +347,53 @@ export class LevelGenerator {
     }
 
     // Creates spinning 3D gold coins, emerald health flasks, and mystic power relics
+    // Creates 3-lane aligned spinning 3D gold coins, emerald health flasks, and mystic power relics
     createCollectibles(level, trackLength) {
         this.collectibles = [];
 
-        // Distribute trails of collectible coins, health flasks, and power-up relics
-        const stepZ = 12;
-        const totalSteps = Math.floor((trackLength - 30) / stepZ);
+        // Distribute trails of collectible coins, health flasks, and power-up relics along the 3 fixed lanes
+        const stepZ = 11;
+        const totalSteps = Math.floor((trackLength - 28) / stepZ);
+        const LANE_WIDTH = 3.2;
 
         for (let s = 1; s < totalSteps; s++) {
-            const z = 18 + s * stepZ;
-            const cx = this.getPathCenterX(z);
+            const z = 16 + s * stepZ;
             const isFork = this.isForkZone(z);
 
-            // In fork sections: place distinct rewards in the 3 lanes!
-            if (isFork) {
-                // Left lane (x = cx - 3.6): Trail of 4 Gold Coins
-                for (let c = 0; c < 4; c++) {
-                    const coinZ = z + (c - 1.5) * 1.8;
-                    const coinX = this.getPathCenterX(coinZ) - 3.6;
-                    this.spawnCoin(coinX, coinZ);
-                }
+            // Cycle lanes (-1: Left, 0: Center, 1: Right)
+            const laneIndex = ((s * 2) % 3) - 1;
+            const isPickup = (s % 5 === 0);
 
-                // Right lane (x = cx + 3.6): Health or Power-Up Relic!
-                if (s % 2 === 0) {
-                    this.spawnHealthPickup(cx + 3.6, z);
+            if (isPickup) {
+                if (s % 10 === 0) {
+                    this.spawnPowerUpPickup(laneIndex, z, LANE_WIDTH);
                 } else {
-                    this.spawnPowerUpPickup(cx + 3.6, z);
+                    this.spawnHealthPickup(laneIndex, z, LANE_WIDTH);
                 }
             } else {
-                // In standard curving road sections:
-                const pattern = s % 4;
+                // Trail of 3 golden coins neatly placed along this lane
+                for (let c = 0; c < 3; c++) {
+                    const coinZ = z + (c - 1) * 1.6;
+                    this.spawnCoin(laneIndex, coinZ, LANE_WIDTH);
+                }
+            }
 
-                if (pattern === 0) {
-                    // Center arc of 5 golden coins
-                    for (let c = 0; c < 5; c++) {
-                        const coinZ = z + (c - 2) * 1.8;
-                        const coinX = this.getPathCenterX(coinZ) + Math.sin(c * 0.7) * 1.5;
-                        this.spawnCoin(coinX, coinZ);
-                    }
-                } else if (pattern === 1) {
-                    // Left lane coin run
-                    for (let c = 0; c < 4; c++) {
-                        const coinZ = z + (c - 1.5) * 1.8;
-                        const coinX = this.getPathCenterX(coinZ) - 2.8;
-                        this.spawnCoin(coinX, coinZ);
-                    }
-                } else if (pattern === 2) {
-                    // Right lane coin run
-                    for (let c = 0; c < 4; c++) {
-                        const coinZ = z + (c - 1.5) * 1.8;
-                        const coinX = this.getPathCenterX(coinZ) + 2.8;
-                        this.spawnCoin(coinX, coinZ);
-                    }
-                } else if (pattern === 3) {
-                    // Occasional high-value relic in center lane
-                    if (s % 3 === 0) {
-                        this.spawnHealthPickup(cx, z);
-                    } else {
-                        this.spawnPowerUpPickup(cx, z);
-                    }
+            // In fork sections: place an extra coin trail in the other open lane
+            if (isFork && s % 2 === 0) {
+                const altLane = (laneIndex === 0) ? -1 : 0;
+                for (let c = 0; c < 3; c++) {
+                    const coinZ = z + (c - 1) * 1.6;
+                    this.spawnCoin(altLane, coinZ, LANE_WIDTH);
                 }
             }
         }
     }
 
-    spawnCoin(x, z) {
+    spawnCoin(laneIndex, z, laneWidth = 3.2) {
         const group = new THREE.Group();
+        const laneX = laneIndex * laneWidth;
+        const cx = this.getPathCenterX(z);
+        const worldX = cx + laneX;
         
         // Shiny 3D golden coin with beveled rim
         const coinMat = new THREE.MeshStandardMaterial({
@@ -440,25 +421,30 @@ export class LevelGenerator {
         star.rotation.z = Math.PI / 4;
         group.add(star);
 
-        group.position.set(x, 0.85, -z);
+        group.position.set(worldX, 0.85, -z);
         group.userData.dynamic = true;
         this.scene.add(group);
         this.meshes.push(group);
 
         this.collectibles.push({
             type: 'coin',
-            x: x,
+            laneIndex: laneIndex,
+            laneX: laneX,
+            x: worldX,
             z: z,
             mesh: group,
             collected: false,
             value: 1,
-            radius: 1.25,
+            radius: 1.35,
             phase: Math.random() * Math.PI * 2
         });
     }
 
-    spawnHealthPickup(x, z) {
+    spawnHealthPickup(laneIndex, z, laneWidth = 3.2) {
         const group = new THREE.Group();
+        const laneX = laneIndex * laneWidth;
+        const cx = this.getPathCenterX(z);
+        const worldX = cx + laneX;
 
         // Floating emerald vitality flask
         const flaskMat = new THREE.MeshStandardMaterial({
@@ -488,14 +474,16 @@ export class LevelGenerator {
         aura.position.y = -0.55;
         group.add(aura);
 
-        group.position.set(x, 1.1, -z);
+        group.position.set(worldX, 1.1, -z);
         group.userData.dynamic = true;
         this.scene.add(group);
         this.meshes.push(group);
 
         this.collectibles.push({
             type: 'health',
-            x: x,
+            laneIndex: laneIndex,
+            laneX: laneX,
+            x: worldX,
             z: z,
             mesh: group,
             collected: false,
@@ -505,8 +493,11 @@ export class LevelGenerator {
         });
     }
 
-    spawnPowerUpPickup(x, z) {
+    spawnPowerUpPickup(laneIndex, z, laneWidth = 3.2) {
         const group = new THREE.Group();
+        const laneX = laneIndex * laneWidth;
+        const cx = this.getPathCenterX(z);
+        const worldX = cx + laneX;
 
         // Glowing celestial mystic shield relic
         const relicMat = new THREE.MeshStandardMaterial({
@@ -529,14 +520,16 @@ export class LevelGenerator {
         ring.rotation.x = Math.PI / 4;
         group.add(ring);
 
-        group.position.set(x, 1.15, -z);
+        group.position.set(worldX, 1.15, -z);
         group.userData.dynamic = true;
         this.scene.add(group);
         this.meshes.push(group);
 
         this.collectibles.push({
             type: 'powerup',
-            x: x,
+            laneIndex: laneIndex,
+            laneX: laneX,
+            x: worldX,
             z: z,
             mesh: group,
             collected: false,
@@ -546,92 +539,96 @@ export class LevelGenerator {
         });
     }
 
-    // Creates authentic temple obstacles: broken ruins, rocks, fallen pillars, gaps, and low barriers
+    // Creates authentic temple obstacles categorized by avoidance mechanic:
+    // 1. 'low': Jump over or change lane (fallen pillars, low altars, spike traps)
+    // 2. 'high': Crouch/slide under or change lane (overhead arch beams, hanging ruins)
+    // 3. 'tall': Cannot jump or slide under, MUST change lane (solid monoliths, tall rock piles)
     createObstacles(level, trackLength) {
         this.obstacles = [];
-        const count = 7 + level * 2;
+        const count = 10 + level * 2;
         const enemyZones = [50, 95, 140, 185]; // Avoid enemy zones
+        const LANE_WIDTH = 3.2;
 
         for (let i = 0; i < count; i++) {
             let z;
             let attempts = 0;
             do {
-                z = 28 + Math.random() * (trackLength - 55);
+                z = 24 + (i / count) * (trackLength - 50) + (Math.random() - 0.5) * 6;
                 attempts++;
-            } while (enemyZones.some(ez => Math.abs(ez - z) < 10) && attempts < 40);
+            } while (enemyZones.some(ez => Math.abs(ez - z) < 9) && attempts < 40);
 
             if (attempts >= 40) continue;
 
             const cx = this.getPathCenterX(z);
-            const isFork = this.isForkZone(z);
-            const obsType = Math.floor(Math.random() * 5);
-
-            let laneX = 0;
-            let width = 2.8;
-
-            if (isFork) {
-                // In fork section: block one of the 3 paths (left -3.6, center 0, right +3.6)
-                const laneChoice = Math.random();
-                if (laneChoice < 0.35) laneX = -3.6;
-                else if (laneChoice < 0.7) laneX = 0;
-                else laneX = 3.6;
-                width = 2.6;
-            } else {
-                // Standard road: place on left (-3.0), center (0), or right (+3.0)
-                const laneChoice = Math.random();
-                if (laneChoice < 0.35) laneX = -3.0;
-                else if (laneChoice < 0.7) laneX = 0;
-                else laneX = 3.0;
-                width = 3.0;
-            }
-
+            const laneIndices = [-1, 0, 1];
+            // Deterministic variety for balanced play
+            const laneIndex = laneIndices[(i * 2 + 1) % 3];
+            const laneX = laneIndex * LANE_WIDTH;
             const worldX = cx + laneX;
+            const width = 2.8;
 
-            if (obsType === 0) {
-                // 1. Fallen Stone Pillar
+            // Pattern cycle:
+            // 0: low fallen pillar
+            // 1: high overhead beam
+            // 2: tall solid monolith
+            // 3: low spike trap
+            // 4: high collapsed arch
+            // 5: low altar barrier
+            const typeIndex = i % 6;
+            let obstacleType = 'low';
+
+            if (typeIndex === 0) {
+                obstacleType = 'low';
                 this.createFallenPillarObstacle(worldX, z, width);
-            } else if (obsType === 1) {
-                // 2. Ancient Ruin Rubble & Boulder Pile
-                this.createRubbleObstacle(worldX, z, width);
-            } else if (obsType === 2) {
-                // 3. Low Carved Stone Altar Barrier
-                this.createAltarBarrierObstacle(worldX, z, width);
-            } else if (obsType === 3) {
-                // 4. Sunken Spike Trap
+            } else if (typeIndex === 1) {
+                obstacleType = 'high';
+                this.createOverheadBeamObstacle(worldX, z, width);
+            } else if (typeIndex === 2) {
+                obstacleType = 'tall';
+                this.createMonolithObstacle(worldX, z, width);
+            } else if (typeIndex === 3) {
+                obstacleType = 'low';
                 this.createSpikeTrapObstacle(worldX, z, width);
-            } else {
-                // 5. Collapsed Arch Debris
+            } else if (typeIndex === 4) {
+                obstacleType = 'high';
                 this.createArchDebrisObstacle(worldX, z, width);
+            } else {
+                obstacleType = 'low';
+                this.createAltarBarrierObstacle(worldX, z, width);
             }
 
             this.obstacles.push({
+                laneIndex: laneIndex,
+                laneX: laneX,
                 x: laneX,
                 worldX: worldX,
                 z: z,
                 width: width,
-                passed: false
+                obstacleType: obstacleType,
+                passed: false,
+                avoided: false
             });
         }
     }
 
+    // LOW OBSTACLE: Broken fluted pillar cylinder lying along the road (Jump to avoid)
     createFallenPillarObstacle(x, z, width) {
         const group = new THREE.Group();
         const stoneMat = new THREE.MeshStandardMaterial({ color: 0x948067, roughness: 0.8, metalness: 0.1 });
         const crackedMat = new THREE.MeshStandardMaterial({ color: 0x6e5b46, roughness: 0.9 });
 
-        // Broken fluted pillar cylinder lying horizontally
-        const pillarGeo = new THREE.CylinderGeometry(0.38, 0.42, width, 10);
+        const pillarGeo = new THREE.CylinderGeometry(0.32, 0.38, width, 10);
         const pillar = new THREE.Mesh(pillarGeo, stoneMat);
         pillar.rotation.z = Math.PI / 2;
-        pillar.position.y = 0.38;
+        pillar.position.y = 0.32;
         pillar.castShadow = true;
         group.add(pillar);
 
-        // Cracked stone fragments and fallen rubble around pillar
+        // Cracked stone fragments
         for (let i = 0; i < 4; i++) {
-            const chunkGeo = new THREE.DodecahedronGeometry(0.25 + Math.random() * 0.15, 0);
+            const chunkGeo = new THREE.DodecahedronGeometry(0.2 + Math.random() * 0.12, 0);
             const chunk = new THREE.Mesh(chunkGeo, crackedMat);
-            chunk.position.set((Math.random() - 0.5) * (width * 0.8), 0.2, (Math.random() - 0.5) * 0.8);
+            chunk.position.set((Math.random() - 0.5) * (width * 0.8), 0.16, (Math.random() - 0.5) * 0.6);
             chunk.rotation.set(Math.random(), Math.random(), Math.random());
             chunk.castShadow = true;
             group.add(chunk);
@@ -643,60 +640,22 @@ export class LevelGenerator {
         this.meshes.push(group);
     }
 
-    createRubbleObstacle(x, z, width) {
-        const group = new THREE.Group();
-        const stoneMat = new THREE.MeshStandardMaterial({ color: 0x7c6953, roughness: 0.88, metalness: 0.1 });
-        const mossMat = new THREE.MeshStandardMaterial({ color: 0x3d6645, roughness: 0.9 });
-
-        // Cluster of weathered rectangular temple blocks and mossy boulders
-        for (let i = 0; i < 5; i++) {
-            const isBlock = i % 2 === 0;
-            const geo = isBlock 
-                ? new THREE.BoxGeometry(0.7 + Math.random() * 0.4, 0.6 + Math.random() * 0.4, 0.6 + Math.random() * 0.3)
-                : new THREE.DodecahedronGeometry(0.45 + Math.random() * 0.2, 0);
-            const mat = (i === 1) ? mossMat : stoneMat;
-            const piece = new THREE.Mesh(geo, mat);
-            piece.position.set(
-                (i - 2) * (width / 4.5) + (Math.random() - 0.5) * 0.2,
-                0.35 + Math.random() * 0.2,
-                (Math.random() - 0.5) * 0.4
-            );
-            piece.rotation.set(Math.random() * 0.4, Math.random() * Math.PI, Math.random() * 0.4);
-            piece.castShadow = true;
-            group.add(piece);
-        }
-
-        group.position.set(x, 0, -z);
-        group.userData.dynamic = true;
-        this.scene.add(group);
-        this.meshes.push(group);
-    }
-
+    // LOW OBSTACLE: Carved stone altar block with corner urns (Jump to avoid)
     createAltarBarrierObstacle(x, z, width) {
         const group = new THREE.Group();
         const stoneMat = new THREE.MeshStandardMaterial({ color: 0x8a7356, roughness: 0.78, metalness: 0.15 });
         const goldMat = new THREE.MeshStandardMaterial({ color: 0xd4af37, roughness: 0.4, metalness: 0.6 });
 
-        // Low carved stone altar block
-        const altarGeo = new THREE.BoxGeometry(width, 1.0, 0.7);
+        const altarGeo = new THREE.BoxGeometry(width, 0.7, 0.7);
         const altar = new THREE.Mesh(altarGeo, stoneMat);
-        altar.position.y = 0.5;
+        altar.position.y = 0.35;
         altar.castShadow = true;
         group.add(altar);
 
-        // Carved golden frieze trim along the top edge
-        const trimGeo = new THREE.BoxGeometry(width + 0.1, 0.15, 0.8);
+        const trimGeo = new THREE.BoxGeometry(width + 0.1, 0.12, 0.8);
         const trim = new THREE.Mesh(trimGeo, goldMat);
-        trim.position.y = 1.05;
+        trim.position.y = 0.72;
         group.add(trim);
-
-        // Small carved relief urns on corners
-        for (let side of [-1, 1]) {
-            const urnGeo = new THREE.CylinderGeometry(0.18, 0.14, 0.35, 6);
-            const urn = new THREE.Mesh(urnGeo, stoneMat);
-            urn.position.set(side * (width / 2 - 0.3), 1.25, 0);
-            group.add(urn);
-        }
 
         group.position.set(x, 0, -z);
         group.userData.dynamic = true;
@@ -704,28 +663,27 @@ export class LevelGenerator {
         this.meshes.push(group);
     }
 
+    // LOW OBSTACLE: Sunken spike trap in the road (Jump to avoid)
     createSpikeTrapObstacle(x, z, width) {
         const group = new THREE.Group();
         const plateMat = new THREE.MeshStandardMaterial({ color: 0x3d3328, roughness: 0.95 });
         const spikeMat = new THREE.MeshStandardMaterial({ color: 0x8a1c14, metalness: 0.8, roughness: 0.3 });
 
-        // Sunken stone trap grate
-        const grateGeo = new THREE.BoxGeometry(width, 0.12, 1.6);
+        const grateGeo = new THREE.BoxGeometry(width, 0.1, 1.4);
         const grate = new THREE.Mesh(grateGeo, plateMat);
-        grate.position.y = 0.06;
+        grate.position.y = 0.05;
         grate.receiveShadow = true;
         group.add(grate);
 
-        // Menacing ancient rusted iron spikes
-        const spikeCount = Math.floor(width / 0.7);
+        const spikeCount = Math.floor(width / 0.65);
         for (let row = -1; row <= 1; row += 2) {
             for (let col = 0; col < spikeCount; col++) {
-                const spikeGeo = new THREE.ConeGeometry(0.14, 0.75, 4);
+                const spikeGeo = new THREE.ConeGeometry(0.12, 0.55, 4);
                 const spike = new THREE.Mesh(spikeGeo, spikeMat);
                 spike.position.set(
-                    (col - (spikeCount - 1) / 2) * 0.65,
-                    0.42,
-                    row * 0.45
+                    (col - (spikeCount - 1) / 2) * 0.6,
+                    0.32,
+                    row * 0.4
                 );
                 spike.castShadow = true;
                 group.add(spike);
@@ -738,31 +696,122 @@ export class LevelGenerator {
         this.meshes.push(group);
     }
 
-    createArchDebrisObstacle(x, z, width) {
+    // HIGH OBSTACLE: Overhead broken stone lintel beam suspended across the lane (Slide under to avoid)
+    createOverheadBeamObstacle(x, z, width) {
         const group = new THREE.Group();
-        const stoneMat = new THREE.MeshStandardMaterial({ color: 0x7e6952, roughness: 0.82 });
+        const stoneMat = new THREE.MeshStandardMaterial({ color: 0x7a654e, roughness: 0.82 });
+        const woodMat = new THREE.MeshStandardMaterial({ color: 0x4a3728, roughness: 0.9 });
+        const vineMat = new THREE.MeshStandardMaterial({ color: 0x2e6930, roughness: 0.95 });
 
-        // Tilted broken pillar fragment creating a narrow barrier
-        const pillarGeo = new THREE.CylinderGeometry(0.35, 0.45, 2.2, 8);
-        const pillar = new THREE.Mesh(pillarGeo, stoneMat);
-        pillar.position.set(-width * 0.25, 0.9, 0);
-        pillar.rotation.z = 0.35;
-        pillar.castShadow = true;
-        group.add(pillar);
+        // Left & right supporting ruined wooden/stone stanchions
+        const postGeo = new THREE.CylinderGeometry(0.16, 0.2, 2.5, 8);
+        const leftPost = new THREE.Mesh(postGeo, stoneMat);
+        leftPost.position.set(-width / 2 + 0.15, 1.25, 0);
+        leftPost.castShadow = true;
+        group.add(leftPost);
 
-        // Crushed capital block on ground
-        const capGeo = new THREE.BoxGeometry(0.8, 0.6, 0.8);
-        const cap = new THREE.Mesh(capGeo, stoneMat);
-        cap.position.set(width * 0.2, 0.3, 0);
-        cap.rotation.set(0.2, 0.5, -0.2);
-        cap.castShadow = true;
-        group.add(cap);
+        const rightPost = new THREE.Mesh(postGeo, stoneMat);
+        rightPost.position.set(width / 2 - 0.15, 1.25, 0);
+        rightPost.castShadow = true;
+        group.add(rightPost);
+
+        // Low-hanging beam (Clearance underneath is ~1.25m: upright hero hits it, sliding clears it!)
+        const beamGeo = new THREE.BoxGeometry(width + 0.3, 0.45, 0.5);
+        const beam = new THREE.Mesh(beamGeo, woodMat);
+        beam.position.set(0, 1.6, 0);
+        beam.castShadow = true;
+        group.add(beam);
+
+        // Hanging ancient temple vines dangling from beam
+        for (let i = 0; i < 4; i++) {
+            const vineGeo = new THREE.CylinderGeometry(0.04, 0.02, 0.45, 6);
+            const vine = new THREE.Mesh(vineGeo, vineMat);
+            vine.position.set((i - 1.5) * 0.55, 1.25, 0.1);
+            group.add(vine);
+        }
 
         group.position.set(x, 0, -z);
         group.userData.dynamic = true;
         this.scene.add(group);
         this.meshes.push(group);
     }
+
+    // HIGH OBSTACLE: Collapsed hanging arch lintel (Slide under to avoid)
+    createArchDebrisObstacle(x, z, width) {
+        const group = new THREE.Group();
+        const stoneMat = new THREE.MeshStandardMaterial({ color: 0x7e6952, roughness: 0.82 });
+        const reliefMat = new THREE.MeshStandardMaterial({ color: 0xb59955, roughness: 0.5, metalness: 0.5 });
+
+        // Arch pillars on sides
+        const pillarGeo = new THREE.BoxGeometry(0.35, 2.4, 0.45);
+        const leftP = new THREE.Mesh(pillarGeo, stoneMat);
+        leftP.position.set(-width / 2 + 0.15, 1.2, 0);
+        group.add(leftP);
+
+        const rightP = new THREE.Mesh(pillarGeo, stoneMat);
+        rightP.position.set(width / 2 - 0.15, 1.2, 0);
+        group.add(rightP);
+
+        // Overhead lintel beam positioned at chest/head level (Slide underneath!)
+        const lintelGeo = new THREE.BoxGeometry(width + 0.2, 0.5, 0.6);
+        const lintel = new THREE.Mesh(lintelGeo, stoneMat);
+        lintel.position.set(0, 1.55, 0);
+        lintel.castShadow = true;
+        group.add(lintel);
+
+        // Carved rune crest on lintel
+        const crestGeo = new THREE.BoxGeometry(0.6, 0.35, 0.65);
+        const crest = new THREE.Mesh(crestGeo, reliefMat);
+        crest.position.set(0, 1.55, 0);
+        group.add(crest);
+
+        group.position.set(x, 0, -z);
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+    }
+
+    // TALL OBSTACLE: Giant ancient stone monolith / totem obelisk (CANNOT jump or slide, MUST change lane)
+    createMonolithObstacle(x, z, width) {
+        const group = new THREE.Group();
+        const stoneMat = new THREE.MeshStandardMaterial({ color: 0x5a4d3f, roughness: 0.85, metalness: 0.1 });
+        const runeMat = new THREE.MeshStandardMaterial({ 
+            color: 0xff3d00, 
+            emissive: 0xff1744, 
+            emissiveIntensity: 0.9, 
+            roughness: 0.3 
+        });
+
+        // Massive solid monolith block rising 3.4m tall
+        const monolithGeo = new THREE.BoxGeometry(width * 0.82, 3.4, 1.2);
+        const monolith = new THREE.Mesh(monolithGeo, stoneMat);
+        monolith.position.y = 1.7;
+        monolith.castShadow = true;
+        group.add(monolith);
+
+        // Tiered stepped base
+        const baseGeo = new THREE.BoxGeometry(width * 0.95, 0.35, 1.5);
+        const base = new THREE.Mesh(baseGeo, stoneMat);
+        base.position.y = 0.18;
+        base.castShadow = true;
+        group.add(base);
+
+        // Glowing menacing ancient carved rune sigil
+        const runeGeo = new THREE.BoxGeometry(0.5, 0.9, 0.08);
+        const rune = new THREE.Mesh(runeGeo, runeMat);
+        rune.position.set(0, 2.0, 0.62);
+        group.add(rune);
+
+        group.position.set(x, 0, -z);
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+    }
+
+    createRubbleObstacle(x, z, width) {
+        this.createMonolithObstacle(x, z, width);
+    }
+
 
     // Per-frame animation for spinning coins, hovering relics, and torch flames
     update(delta) {

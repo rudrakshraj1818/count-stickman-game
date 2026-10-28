@@ -136,6 +136,7 @@ export class CrowdManager {
         shadow.rotation.x = -Math.PI / 2;
         shadow.position.y = 0.02;
         this.heroGroup.add(shadow);
+        this.heroShadow = shadow;
 
         // 2. Armored Torso / Chestplate
         const torsoGeo = new THREE.CapsuleGeometry(0.22, 0.52, 8, 8);
@@ -391,9 +392,29 @@ export class CrowdManager {
         return (this.game && this.game.heroHP > 0) ? 1 : 0;
     }
 
-    updatePlayerPosition(x, z) {
+    updatePlayerPosition(x, z, jumpY = 0, isSliding = false) {
+        this.currentJumpY = jumpY;
+        this.currentIsSliding = isSliding;
         if (this.heroGroup) {
-            this.heroGroup.position.set(x, 0, z);
+            this.heroGroup.position.set(x, jumpY, z);
+            if (this.heroShadow) {
+                this.heroShadow.position.y = -jumpY + 0.02;
+                const shadowScale = Math.max(0.35, 1.0 - jumpY * 0.28);
+                this.heroShadow.scale.set(shadowScale, shadowScale, shadowScale);
+                if (this.heroShadow.material) {
+                    this.heroShadow.material.opacity = Math.max(0.12, 0.45 - jumpY * 0.16);
+                }
+            }
+        }
+    }
+
+    triggerStumble() {
+        this.stumbleTimer = 0.35;
+        if (this.heroGroup) {
+            const pos = this.heroGroup.position.clone();
+            pos.y += 0.8;
+            this.spawnSparks(pos, 0xff5722, 12);
+            this.spawnImpactFlash(pos, 0xff1744);
         }
     }
 
@@ -405,6 +426,16 @@ export class CrowdManager {
         const deltaX = playerX - this.prevPlayerX;
         this.horizontalVel = THREE.MathUtils.damp(this.horizontalVel, deltaX / Math.max(delta, 0.001), 12, delta);
         this.prevPlayerX = playerX;
+
+        // Stumble shake reaction when hitting obstacles
+        if (this.stumbleTimer > 0) {
+            this.stumbleTimer -= delta;
+            if (this.heroModel) {
+                this.heroModel.position.x = Math.sin(this.stumbleTimer * 45) * 0.12;
+            }
+        } else if (this.heroModel) {
+            this.heroModel.position.x = 0;
+        }
 
         if (this.heroParts && this.heroModel) {
             const parts = this.heroParts;
@@ -446,6 +477,60 @@ export class CrowdManager {
                     this.spawnSlash(slashPos, null, 0x00f0ff, 1.2);
                 }
 
+            } else if (this.currentIsSliding) {
+                // ============ DYNAMIC SLIDE / CROUCH POSE ============
+                // Body lowers and tilts backward ~48 degrees
+                this.heroModel.position.y = -0.28;
+                this.heroModel.rotation.x = -0.85;
+                this.heroGroup.rotation.z = 0;
+
+                // Both legs extended forward in slide
+                parts.leftLegGroup.rotation.x = -1.15;
+                parts.rightLegGroup.rotation.x = -1.05;
+
+                // Shield raised forward to protect head/chest under low obstacles
+                parts.leftArmGroup.rotation.x = -0.9;
+                parts.leftArmGroup.rotation.y = 0.35;
+                parts.leftArmGroup.rotation.z = 0.2;
+
+                // Sword carried low along the runner flank
+                parts.rightArmGroup.rotation.x = 0.35;
+                parts.rightArmGroup.rotation.y = 0;
+                parts.rightArmGroup.rotation.z = -0.3;
+
+                // Cape streams flat behind
+                parts.cape.rotation.x = -0.4;
+                parts.cape.rotation.z = 0;
+
+                // Slide ground sparks & friction dust
+                if (Math.random() < 0.55) {
+                    const dustPos = new THREE.Vector3(
+                        playerX + (Math.random() - 0.5) * 0.35,
+                        0.06,
+                        -trackZ + (Math.random() - 0.5) * 0.35
+                    );
+                    this.spawnSparks(dustPos, 0xffa726, 2);
+                }
+
+            } else if (this.currentJumpY > 0.08) {
+                // ============ DYNAMIC JUMP SILHOUETTE ============
+                this.heroModel.position.y = 0;
+                this.heroModel.rotation.x = -0.15; // forward aerodynamic leap
+                this.heroGroup.rotation.z = THREE.MathUtils.clamp(-this.horizontalVel * 0.025, -0.18, 0.18);
+
+                // Legs tucked upward for clear obstacle clearance
+                parts.leftLegGroup.rotation.x = -0.7;
+                parts.rightLegGroup.rotation.x = 0.5;
+
+                // Arms outstretched for balance in air
+                parts.leftArmGroup.rotation.x = 0.45;
+                parts.leftArmGroup.rotation.z = 0.5;
+                parts.rightArmGroup.rotation.x = -0.75;
+                parts.rightArmGroup.rotation.z = -0.5;
+
+                // Cape billows upward against gravity
+                parts.cape.rotation.x = 0.85;
+
             } else {
                 // ============ NORMAL RUNNING ANIMATION ============
                 this.combatTime = 0;
@@ -457,7 +542,7 @@ export class CrowdManager {
                 // Dynamic sprint forward lean
                 this.heroModel.rotation.x = 0.16;
 
-                // Steering bank into left/right swipe
+                // Steering bank into left/right lane switch
                 const bankAngle = THREE.MathUtils.clamp(-this.horizontalVel * 0.035, -0.22, 0.22);
                 this.heroGroup.rotation.z = THREE.MathUtils.damp(this.heroGroup.rotation.z, bankAngle, 10, delta);
 

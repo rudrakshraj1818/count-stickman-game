@@ -56,19 +56,37 @@ export class Game {
         this.fightCameraTime = 0;
         this.fightTickCount = 0;
         
-        // Player position & speed
+        // 3-Lane Temple Run Movement
+        this.currentLane = 0; // -1: Left, 0: Center, 1: Right
+        this.LANE_WIDTH = 3.2;
         this.playerX = 0;
+        this.laneChangeSpeed = 22;
         this.speed = 9;
         this.trackZ = 0;
+
+        // Jump Mechanics
+        this.isJumping = false;
+        this.jumpY = 0;
+        this.jumpVelocity = 0;
+        this.GRAVITY = 32;
+        this.JUMP_FORCE = 12.5;
+
+        // Crouch / Slide Mechanics
+        this.isSliding = false;
+        this.slideTimer = 0;
+        this.SLIDE_DURATION = 0.72;
+
+        // Swipe & Touch Tracking
+        this.touchStartX = 0;
+        this.touchStartY = 0;
+        this.touchStartTime = 0;
+        this.swipeTriggered = false;
+        this.isDragging = false;
+        this.keys = {};
         
         // Level
         this.levelGenerator = null;
         this.trackLength = 200;
-        
-        // Input
-        this.isDragging = false;
-        this.lastInputX = 0;
-        this.keys = {};
         
         // Load saved data
         this.loadProgress();
@@ -169,48 +187,140 @@ export class Game {
         this.hemiLight = hemi;
     }
 
+    changeLane(dir) {
+        if (this.state !== 'playing') return;
+        const prevLane = this.currentLane;
+        this.currentLane = Math.max(-1, Math.min(1, this.currentLane + dir));
+        if (this.currentLane !== prevLane && this.audio) {
+            this.audio.playLaneChange();
+        }
+    }
+
+    jump() {
+        if (this.state !== 'playing') return;
+        if (this.jumpY <= 0.05 && !this.isJumping) {
+            this.isJumping = true;
+            this.jumpVelocity = this.JUMP_FORCE;
+            if (this.isSliding) {
+                this.isSliding = false;
+                this.slideTimer = 0;
+            }
+            if (this.audio) this.audio.playJump();
+        }
+    }
+
+    slide() {
+        if (this.state !== 'playing') return;
+        if (this.isJumping || this.jumpY > 0.05) {
+            // Fast downward drop from air
+            this.jumpVelocity = -24;
+        } else {
+            this.isSliding = true;
+            this.slideTimer = this.SLIDE_DURATION;
+            if (this.audio) this.audio.playSlide();
+        }
+    }
+
     setupInput() {
         const canvas = this.renderer.domElement;
         
-        // Mouse
+        // Mouse swipe gestures
         canvas.addEventListener('mousedown', (e) => {
             if (this.state !== 'playing') return;
             this.isDragging = true;
-            this.lastInputX = e.clientX;
+            this.touchStartX = e.clientX;
+            this.touchStartY = e.clientY;
+            this.swipeTriggered = false;
         });
+
         canvas.addEventListener('mousemove', (e) => {
             if (!this.isDragging || this.state !== 'playing') return;
-            const deltaX = (e.clientX - this.lastInputX) * 0.02;
-            this.playerX = Math.max(-4.4, Math.min(4.4, this.playerX + deltaX));
-            this.lastInputX = e.clientX;
+            const dx = e.clientX - this.touchStartX;
+            const dy = e.clientY - this.touchStartY;
+            const dist = Math.hypot(dx, dy);
+
+            if (!this.swipeTriggered && dist >= 32) {
+                this.swipeTriggered = true;
+                if (Math.abs(dx) > Math.abs(dy)) {
+                    if (dx > 0) this.changeLane(1);
+                    else this.changeLane(-1);
+                } else {
+                    if (dy < 0) this.jump();
+                    else this.slide();
+                }
+                this.touchStartX = e.clientX;
+                this.touchStartY = e.clientY;
+                this.swipeTriggered = false;
+            }
         });
+
         canvas.addEventListener('mouseup', () => { this.isDragging = false; });
         canvas.addEventListener('mouseleave', () => { this.isDragging = false; });
 
-        // Touch
+        // Touch swipe gestures
         canvas.addEventListener('touchstart', (e) => {
             if (this.state !== 'playing') return;
             this.isDragging = true;
-            this.lastInputX = e.touches[0].clientX;
-        });
+            const touch = e.touches[0];
+            this.touchStartX = touch.clientX;
+            this.touchStartY = touch.clientY;
+            this.swipeTriggered = false;
+        }, { passive: true });
+
         canvas.addEventListener('touchmove', (e) => {
             if (!this.isDragging || this.state !== 'playing') return;
-            const deltaX = (e.touches[0].clientX - this.lastInputX) * 0.02;
-            this.playerX = Math.max(-4.4, Math.min(4.4, this.playerX + deltaX));
-            this.lastInputX = e.touches[0].clientX;
-        });
+            const touch = e.touches[0];
+            const dx = touch.clientX - this.touchStartX;
+            const dy = touch.clientY - this.touchStartY;
+            const dist = Math.hypot(dx, dy);
+
+            if (!this.swipeTriggered && dist >= 30) {
+                this.swipeTriggered = true;
+                if (Math.abs(dx) > Math.abs(dy)) {
+                    if (dx > 0) this.changeLane(1);
+                    else this.changeLane(-1);
+                } else {
+                    if (dy < 0) this.jump();
+                    else this.slide();
+                }
+                this.touchStartX = touch.clientX;
+                this.touchStartY = touch.clientY;
+                this.swipeTriggered = false;
+            }
+        }, { passive: true });
+
         canvas.addEventListener('touchend', () => { this.isDragging = false; });
 
-        // Keyboard
-        window.addEventListener('keydown', (e) => { this.keys[e.key] = true; });
-        window.addEventListener('keyup', (e) => { this.keys[e.key] = false; });
+        // Keyboard controls (Discrete lane switches & jump/slide)
+        window.addEventListener('keydown', (e) => {
+            if (this.state !== 'playing' || e.repeat) return;
+            const key = e.key.toLowerCase();
+
+            if (key === 'arrowleft' || key === 'a') {
+                this.changeLane(-1);
+            } else if (key === 'arrowright' || key === 'd') {
+                this.changeLane(1);
+            } else if (key === 'arrowup' || key === 'w' || e.key === ' ') {
+                e.preventDefault();
+                this.jump();
+            } else if (key === 'arrowdown' || key === 's') {
+                e.preventDefault();
+                this.slide();
+            }
+        });
     }
 
     startGame() {
         this.state = 'playing';
         this.trackZ = 0;
+        this.currentLane = 0;
         this.playerX = 0;
         this.speed = 9;
+        this.isJumping = false;
+        this.jumpY = 0;
+        this.jumpVelocity = 0;
+        this.isSliding = false;
+        this.slideTimer = 0;
         
         // Audio
         this.audio.init();
@@ -284,12 +394,29 @@ export class Game {
 
         if (this.state !== 'playing') return;
 
-        // Keyboard steering
-        if (this.keys['ArrowLeft'] || this.keys['a']) {
-            this.playerX = Math.max(-4.4, this.playerX - 9 * delta);
+        // Smooth 3-lane interpolation
+        const targetLaneX = this.currentLane * this.LANE_WIDTH;
+        this.playerX = THREE.MathUtils.damp(this.playerX, targetLaneX, this.laneChangeSpeed, delta);
+        this.playerX = Math.max(-this.LANE_WIDTH, Math.min(this.LANE_WIDTH, this.playerX));
+
+        // Parabolic Jump kinematics
+        if (this.isJumping || this.jumpY > 0) {
+            this.jumpVelocity -= this.GRAVITY * delta;
+            this.jumpY += this.jumpVelocity * delta;
+            if (this.jumpY <= 0) {
+                this.jumpY = 0;
+                this.jumpVelocity = 0;
+                this.isJumping = false;
+            }
         }
-        if (this.keys['ArrowRight'] || this.keys['d']) {
-            this.playerX = Math.min(4.4, this.playerX + 9 * delta);
+
+        // Crouch / Slide duration timer
+        if (this.isSliding) {
+            this.slideTimer -= delta;
+            if (this.slideTimer <= 0) {
+                this.isSliding = false;
+                this.slideTimer = 0;
+            }
         }
 
         // Move forward continuously
@@ -298,11 +425,11 @@ export class Game {
         // Update single hero world position along natural curving temple road
         const pathCenterX = this.levelGenerator ? this.levelGenerator.getPathCenterX(this.trackZ) : 0;
         const heroWorldX = pathCenterX + this.playerX;
-        this.crowdManager.updatePlayerPosition(heroWorldX, -this.trackZ);
+        this.crowdManager.updatePlayerPosition(heroWorldX, -this.trackZ, this.jumpY, this.isSliding);
 
-        // Third-Person Camera follow behind hero with forward road curve look-ahead
+        // Third-Person Camera follow behind hero with forward road curve look-ahead and jump offset
         const targetCamX = heroWorldX * 0.82;
-        const targetCamY = 3.3;
+        const targetCamY = 3.3 + this.jumpY * 0.35;
         const targetCamZ = -this.trackZ + 5.8;
 
         this.camera.position.x += (targetCamX - this.camera.position.x) * Math.min(1, delta * 12);
@@ -364,11 +491,12 @@ export class Game {
             const item = collectibles[i];
             if (item.collected) continue;
 
-            const dz = item.z - playerZ;
-            const dx = item.x - heroWorldX;
-            const dist = Math.hypot(dx, dz);
+            const dz = Math.abs(item.z - playerZ);
+            const inLane = (item.laneX !== undefined) 
+                ? Math.abs(this.playerX - item.laneX) < 1.45
+                : Math.abs(heroWorldX - item.x) < 1.45;
 
-            if (dist < (item.radius || 1.35)) {
+            if (inLane && dz < (item.radius || 1.35)) {
                 item.collected = true;
                 if (item.mesh) {
                     this.scene.remove(item.mesh);
@@ -378,20 +506,20 @@ export class Game {
                     this.addCoins(item.value || 1);
                     this.audio.playGateGood();
                     this.ui.showFloatingText(`+${item.value || 1} 🪙`, '#ffd700');
-                    const sparkPos = new THREE.Vector3(item.x, 0.9, -item.z);
+                    const sparkPos = new THREE.Vector3(item.x, 0.9 + this.jumpY * 0.5, -item.z);
                     this.crowdManager.spawnSparks(sparkPos, 0xffd700, 6);
                 } else if (item.type === 'health') {
                     this.healHero(item.value || 30);
                     this.audio.playGateGood();
                     this.ui.showFloatingText(`+${item.value || 30} HP`, '#00e676');
-                    const flashPos = new THREE.Vector3(item.x, 1.1, -item.z);
+                    const flashPos = new THREE.Vector3(item.x, 1.1 + this.jumpY * 0.5, -item.z);
                     this.crowdManager.spawnImpactFlash(flashPos, 0x00e676);
                 } else if (item.type === 'powerup') {
                     this.addHeroArmor(item.value || 25);
                     this.addHeroXP(35);
                     this.audio.playGateGood();
                     this.ui.showFloatingText('+25 SHIELD & XP ⭐', '#00f0ff');
-                    const flashPos = new THREE.Vector3(item.x, 1.1, -item.z);
+                    const flashPos = new THREE.Vector3(item.x, 1.1 + this.jumpY * 0.5, -item.z);
                     this.crowdManager.spawnImpactFlash(flashPos, 0x00f0ff);
                 }
                 this.ui.updateHUDInfo();
@@ -494,21 +622,57 @@ export class Game {
 
         for (const obs of obstacles) {
             if (obs.passed) continue;
-            const obsZ = -obs.z;
-            const playerZ = -this.trackZ;
+            const dz = Math.abs(this.trackZ - obs.z);
 
-            if (Math.abs(playerZ - obsZ) < 1.35) {
-                const playerLeft = heroWorldX - 0.65;
-                const playerRight = heroWorldX + 0.65;
-                const obsLeft = obs.worldX - obs.width / 2;
-                const obsRight = obs.worldX + obs.width / 2;
+            if (dz < 1.35) {
+                const inLane = (obs.laneX !== undefined)
+                    ? Math.abs(this.playerX - obs.laneX) < 1.45
+                    : Math.abs(heroWorldX - obs.worldX) < (obs.width / 2 + 0.4);
 
-                if (playerRight > obsLeft && playerLeft < obsRight) {
+                if (!inLane) continue;
+
+                if (obs.obstacleType === 'low') {
+                    // LOW OBSTACLE: Jump over to avoid!
+                    if (this.jumpY > 0.72) {
+                        obs.passed = true;
+                        obs.avoided = true;
+                        this.ui.showFloatingText('JUMP! 🦘', '#00f0ff');
+                        const sparkPos = new THREE.Vector3(heroWorldX, 0.5, -this.trackZ);
+                        this.crowdManager.spawnSparks(sparkPos, 0x00f0ff, 6);
+                    } else {
+                        // Failed to jump: collision!
+                        obs.passed = true;
+                        this.damageHero(25);
+                        this.audio.playHit();
+                        this.ui.screenShake(10);
+                        this.ui.showFloatingText('TRIP! -25 HP', '#ff5722');
+                        this.crowdManager.triggerStumble();
+                    }
+                } else if (obs.obstacleType === 'high') {
+                    // HIGH OBSTACLE: Slide / crouch under to avoid!
+                    if (this.isSliding) {
+                        obs.passed = true;
+                        obs.avoided = true;
+                        this.ui.showFloatingText('SLIDE! 💨', '#00e676');
+                        const sparkPos = new THREE.Vector3(heroWorldX, 0.25, -this.trackZ);
+                        this.crowdManager.spawnSparks(sparkPos, 0x00e676, 6);
+                    } else {
+                        // Failed to slide: head bonk!
+                        obs.passed = true;
+                        this.damageHero(25);
+                        this.audio.playHit();
+                        this.ui.screenShake(10);
+                        this.ui.showFloatingText('HEAD BONK! -25 HP', '#ff1744');
+                        this.crowdManager.triggerStumble();
+                    }
+                } else {
+                    // TALL OBSTACLE: Solid monolith/wall - cannot jump or slide, must switch lane!
                     obs.passed = true;
-                    this.damageHero(25);
+                    this.damageHero(30);
                     this.audio.playHit();
-                    this.ui.screenShake(8);
-                    this.ui.showFloatingText('-25 HP', '#ff5722');
+                    this.ui.screenShake(12);
+                    this.ui.showFloatingText('CRASH! -30 HP', '#ff1744');
+                    this.crowdManager.triggerStumble();
                 }
             }
         }

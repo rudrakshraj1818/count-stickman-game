@@ -84,6 +84,78 @@ body, #root {
 }
 
 /* ========================================================
+   MOBILE RUNNER CONTROLS (JUMP & SLIDE)
+   ======================================================== */
+#touch-controls {
+    position: absolute;
+    bottom: 24px;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: space-between;
+    padding: 0 24px;
+    pointer-events: none;
+    z-index: 25;
+}
+
+#touch-controls.hidden {
+    display: none;
+}
+
+.touch-btn {
+    pointer-events: auto;
+    width: 68px;
+    height: 68px;
+    border-radius: 50%;
+    background: rgba(10, 18, 36, 0.78);
+    border: 2px solid rgba(0, 240, 255, 0.5);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), inset 0 0 10px rgba(0, 240, 255, 0.25);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #ffffff;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+    transition: transform 0.08s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.touch-btn:active {
+    transform: scale(0.9);
+    background: rgba(0, 240, 255, 0.35);
+    border-color: #00f0ff;
+}
+
+.touch-btn-jump {
+    border-color: rgba(0, 240, 255, 0.6);
+}
+
+.touch-btn-slide {
+    border-color: rgba(255, 152, 0, 0.6);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), inset 0 0 10px rgba(255, 152, 0, 0.25);
+}
+
+.touch-btn-slide:active {
+    background: rgba(255, 152, 0, 0.35);
+    border-color: #ff9800;
+}
+
+.touch-icon {
+    font-size: 22px;
+    line-height: 1;
+    font-weight: 900;
+}
+
+.touch-label {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    margin-top: 3px;
+}
+
+/* ========================================================
    SCREENS & OVERLAYS
    ======================================================== */
 .screen {

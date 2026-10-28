@@ -9,6 +9,7 @@ export class UIManager {
         this.loseScreen = document.getElementById('lose-screen');
         this.hud = document.getElementById('hud');
         this.container = document.getElementById('game-container');
+        this.touchControls = document.getElementById('touch-controls');
         
         // HUD elements
         this.levelDisplay = document.getElementById('level-display');
@@ -41,6 +42,26 @@ export class UIManager {
     }
 
     setupButtons() {
+        const btnJump = document.getElementById('btn-jump');
+        if (btnJump) {
+            btnJump.addEventListener('pointerdown', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                this.game.jump();
+                this.pulseElement(btnJump);
+            });
+        }
+
+        const btnSlide = document.getElementById('btn-slide');
+        if (btnSlide) {
+            btnSlide.addEventListener('pointerdown', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                this.game.slide();
+                this.pulseElement(btnSlide);
+            });
+        }
+
         document.getElementById('play-btn').addEventListener('click', () => {
             this.game.audio.init();
             this.game.audio.playClick();
@@ -231,11 +252,13 @@ export class UIManager {
         this.loseScreen.classList.add('hidden');
         document.getElementById('shop-screen').classList.add('hidden');
         this.hud.style.display = 'none';
+        if (this.touchControls) this.touchControls.classList.add('hidden');
     }
 
     showHUD() {
         this.hud.style.display = 'flex';
         this.hud.style.opacity = '0';
+        if (this.touchControls) this.touchControls.classList.remove('hidden');
         requestAnimationFrame(() => {
             this.hud.style.transition = 'opacity 0.5s ease';
             this.hud.style.opacity = '1';
