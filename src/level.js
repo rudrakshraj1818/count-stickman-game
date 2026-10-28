@@ -199,13 +199,13 @@ export class LevelGenerator {
         this.scene.add(arenaRing);
         this.meshes.push(arenaRing);
 
-        // Stylized arcade ground
-        const groundGeo = new THREE.PlaneGeometry(240, trackLength + 120);
-        const groundColor = (this.game && this.game.getActiveTheme()) ? this.game.getActiveTheme().ground : 0x1b3b2b;
+        // Stylized expansive arcade terrain
+        const groundGeo = new THREE.PlaneGeometry(380, trackLength + 200);
+        const groundColor = (this.game && this.game.getActiveTheme()) ? this.game.getActiveTheme().ground : 0x3d9959;
         const groundMat = new THREE.MeshStandardMaterial({ 
             color: groundColor, 
-            roughness: 0.85,
-            metalness: 0.1
+            roughness: 0.88,
+            metalness: 0.05
         });
         const ground = new THREE.Mesh(groundGeo, groundMat);
         ground.rotation.x = -Math.PI / 2;
@@ -214,6 +214,50 @@ export class LevelGenerator {
         ground.userData.dynamic = true;
         this.scene.add(ground);
         this.meshes.push(ground);
+
+        // Roadside shoulders (clean asphalt verge strips)
+        const shoulderGeo = new THREE.PlaneGeometry(1.2, trackLength + 10);
+        const shoulderMat = new THREE.MeshStandardMaterial({
+            color: 0x1e293b,
+            roughness: 0.7,
+            metalness: 0.15
+        });
+        const leftShoulder = new THREE.Mesh(shoulderGeo, shoulderMat);
+        leftShoulder.rotation.x = -Math.PI / 2;
+        leftShoulder.position.set(-5.8, 0.015, -trackLength / 2);
+        leftShoulder.receiveShadow = true;
+        leftShoulder.userData.dynamic = true;
+        this.scene.add(leftShoulder);
+        this.meshes.push(leftShoulder);
+
+        const rightShoulder = new THREE.Mesh(shoulderGeo, shoulderMat);
+        rightShoulder.rotation.x = -Math.PI / 2;
+        rightShoulder.position.set(5.8, 0.015, -trackLength / 2);
+        rightShoulder.receiveShadow = true;
+        rightShoulder.userData.dynamic = true;
+        this.scene.add(rightShoulder);
+        this.meshes.push(rightShoulder);
+
+        // Alternating red/white racing curb rumble strips
+        for (let z = 0; z < trackLength; z += 3) {
+            const isRed = Math.floor(z / 3) % 2 === 0;
+            const curbCol = isRed ? 0xef4444 : 0xf8fafc;
+            const curbMat = new THREE.MeshStandardMaterial({ color: curbCol, roughness: 0.5 });
+            
+            const leftCurbStripe = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 2.7), curbMat);
+            leftCurbStripe.rotation.x = -Math.PI / 2;
+            leftCurbStripe.position.set(-5.15, 0.02, -z - 1.35);
+            leftCurbStripe.userData.dynamic = true;
+            this.scene.add(leftCurbStripe);
+            this.meshes.push(leftCurbStripe);
+
+            const rightCurbStripe = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 2.7), curbMat);
+            rightCurbStripe.rotation.x = -Math.PI / 2;
+            rightCurbStripe.position.set(5.15, 0.02, -z - 1.35);
+            rightCurbStripe.userData.dynamic = true;
+            this.scene.add(rightCurbStripe);
+            this.meshes.push(rightCurbStripe);
+        }
 
         // Trackside neon light posts (rhythmic markers every 16 units)
         for (let z = 16; z < trackLength - 10; z += 16) {
@@ -894,32 +938,423 @@ export class LevelGenerator {
     }
 
     createDecorations(trackLength) {
-        // Stylized low-poly arcade crystals and energy pylons along track
-        for (let z = 0; z < trackLength; z += 14) {
-            // Left side arcade crystal
-            if (Math.random() > 0.35) {
-                const x = -(7.5 + Math.random() * 8);
-                this.createArcadeCrystal(x, -z + Math.random() * 4);
-            }
-            // Right side arcade crystal
-            if (Math.random() > 0.35) {
-                const x = 7.5 + Math.random() * 8;
-                this.createArcadeCrystal(x, -z + Math.random() * 4);
+        // 1. Layered low-poly rolling hills along both flanks to eliminate flat-plane appearance
+        this.createRollingHills(trackLength);
+
+        // 2. Progressive scenery distribution by zones along the track
+        for (let z = 8; z < trackLength - 8; z += 7) {
+            const progress = z / trackLength; // 0.0 to 1.0
+
+            // Both left and right side scenery
+            for (let side of [-1, 1]) {
+                const rand = Math.random();
+                const jitterZ = -z + (Math.random() - 0.5) * 4;
+
+                // Zone 1: Meadow Parkway (Start to 35%)
+                if (progress < 0.35) {
+                    // Immediate verge: roadside flags & flowering bushes
+                    if (rand < 0.25) {
+                        const flagX = side * 5.6;
+                        const flagCol = side > 0 ? 0x0284c7 : 0xf43f5e;
+                        this.createRoadsideFlag(flagX, jitterZ, flagCol);
+                    } else if (rand < 0.55) {
+                        const bushX = side * (6.8 + Math.random() * 2.2);
+                        const flowerCol = Math.random() > 0.5 ? 0xf43f5e : 0xfacc15;
+                        this.createBush(bushX, jitterZ, 0.7 + Math.random() * 0.4, flowerCol);
+                    }
+
+                    // Mid verge: Lush round fluffy trees & boulders
+                    const treeX = side * (8.5 + Math.random() * 14);
+                    const treeScale = 0.85 + Math.random() * 0.5;
+                    const foliageCols = [0x22c55e, 0x16a34a, 0x15803d, 0x4ade80];
+                    const fCol = foliageCols[Math.floor(Math.random() * foliageCols.length)];
+                    this.createRoundTree(treeX, jitterZ, treeScale, fCol);
+
+                    if (Math.random() > 0.4) {
+                        const rockX = side * (7.5 + Math.random() * 12);
+                        this.createRock(rockX, jitterZ + 2, 0.5 + Math.random() * 0.6);
+                    }
+                }
+                // Zone 2: Palm Oasis & Valley (35% to 72%)
+                else if (progress < 0.72) {
+                    // Verge: arcade crystals & warm boulders
+                    if (rand < 0.3) {
+                        const crysX = side * (7.0 + Math.random() * 3.5);
+                        this.createArcadeCrystal(crysX, jitterZ);
+                    } else if (rand < 0.6) {
+                        const bushX = side * (6.8 + Math.random() * 2.5);
+                        this.createBush(bushX, jitterZ, 0.8 + Math.random() * 0.3, 0xa855f7);
+                    }
+
+                    // Mid verge: Stylized arcade palms & scattered conifers
+                    const treeX = side * (8.5 + Math.random() * 15);
+                    if (Math.random() > 0.3) {
+                        this.createPalmTree(treeX, jitterZ, 0.9 + Math.random() * 0.4);
+                    } else {
+                        this.createPineTree(treeX, jitterZ, 0.85 + Math.random() * 0.4);
+                    }
+
+                    const rockX = side * (8.0 + Math.random() * 12);
+                    this.createRock(rockX, jitterZ - 1.5, 0.6 + Math.random() * 0.7);
+                }
+                // Zone 3: Colosseum & Arena Approach (72% to 100%)
+                else {
+                    // Verge: Grand stone obelisks & triumphant flags
+                    if (rand < 0.35) {
+                        const pylonX = side * 5.8;
+                        this.createObelisk(pylonX, jitterZ, 0.9 + Math.random() * 0.3);
+                    } else if (rand < 0.65) {
+                        const flagX = side * 5.6;
+                        this.createRoadsideFlag(flagX, jitterZ, 0xfacc15);
+                    }
+
+                    // Mid verge: Dense alpine evergreen pines framing the approach
+                    const pineX = side * (8.0 + Math.random() * 16);
+                    this.createPineTree(pineX, jitterZ, 1.0 + Math.random() * 0.6);
+
+                    if (Math.random() > 0.35) {
+                        const rockX = side * (7.5 + Math.random() * 10);
+                        this.createRock(rockX, jitterZ + 1.2, 0.7 + Math.random() * 0.7);
+                    }
+                }
             }
         }
 
-        // Stylized low-poly trees along the track
-        for (let z = 0; z < trackLength; z += 10) {
-            const side = Math.random() > 0.5 ? 1 : -1;
-            const x = side * (6.5 + Math.random() * 6);
-            this.createTree(x, -z + Math.random() * 4);
-        }
-
-        // Geometric mountains in the background
+        // 3. Dual-layer mountain ranges along the horizon
         this.createMountains(trackLength);
 
-        // Low-poly stylized clouds in the sky
+        // 4. Distant colorful hot air balloons adding arcade life to the horizon
+        this.createHotAirBalloons(trackLength);
+
+        // 5. Stylized low-poly 3D clouds in the bright sky
         this.createClouds(trackLength);
+    }
+
+    createRollingHills(trackLength) {
+        // Create low-poly rolling mounds along both sides
+        const hillColors = [0x32834b, 0x3d9959, 0x2d7343, 0x45a863];
+        for (let z = 0; z < trackLength + 60; z += 18) {
+            for (let side of [-1, 1]) {
+                const hillX = side * (22 + Math.random() * 18);
+                const hillZ = -z + (Math.random() - 0.5) * 8;
+                const radius = 9 + Math.random() * 8;
+                const height = 1.6 + Math.random() * 2.2;
+
+                const hillGeo = new THREE.CylinderGeometry(radius * 0.3, radius, height, 7);
+                const hillMat = new THREE.MeshStandardMaterial({
+                    color: hillColors[Math.floor(Math.random() * hillColors.length)],
+                    flatShading: true,
+                    roughness: 0.9
+                });
+                const hill = new THREE.Mesh(hillGeo, hillMat);
+                hill.position.set(hillX, height * 0.45 - 0.05, hillZ);
+                hill.rotation.y = Math.random() * Math.PI;
+                hill.receiveShadow = true;
+                hill.userData.dynamic = true;
+                this.scene.add(hill);
+                this.meshes.push(hill);
+            }
+        }
+    }
+
+    createRoundTree(x, z, scale = 1, foliageColor = 0x22c55e) {
+        const group = new THREE.Group();
+
+        // Wooden Trunk
+        const trunkGeo = new THREE.CylinderGeometry(0.18 * scale, 0.28 * scale, 2.2 * scale, 6);
+        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5c3a21, roughness: 0.8 });
+        const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+        trunk.position.y = 1.1 * scale;
+        trunk.castShadow = true;
+        group.add(trunk);
+
+        // Multi-part fluffy canopy (3 overlapping low-poly spheres)
+        const canopyMat = new THREE.MeshStandardMaterial({
+            color: foliageColor,
+            flatShading: true,
+            roughness: 0.6
+        });
+        const mainCanopy = new THREE.Mesh(new THREE.DodecahedronGeometry(1.25 * scale, 1), canopyMat);
+        mainCanopy.position.y = 2.4 * scale;
+        mainCanopy.castShadow = true;
+        group.add(mainCanopy);
+
+        const subCanopy1 = new THREE.Mesh(new THREE.DodecahedronGeometry(0.9 * scale, 1), canopyMat);
+        subCanopy1.position.set(0.45 * scale, 2.7 * scale, 0.25 * scale);
+        subCanopy1.castShadow = true;
+        group.add(subCanopy1);
+
+        const highlightMat = new THREE.MeshStandardMaterial({
+            color: 0x4ade80,
+            flatShading: true,
+            roughness: 0.6
+        });
+        const topCanopy = new THREE.Mesh(new THREE.DodecahedronGeometry(0.8 * scale, 1), highlightMat);
+        topCanopy.position.set(-0.25 * scale, 3.2 * scale, -0.15 * scale);
+        topCanopy.castShadow = true;
+        group.add(topCanopy);
+
+        group.position.set(x, 0, z);
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+    }
+
+    createPalmTree(x, z, scale = 1) {
+        const group = new THREE.Group();
+
+        // Curved segmented trunk
+        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x785338, roughness: 0.75 });
+        const seg1 = new THREE.Mesh(new THREE.CylinderGeometry(0.18 * scale, 0.26 * scale, 1.5 * scale, 6), trunkMat);
+        seg1.position.set(0, 0.75 * scale, 0);
+        seg1.rotation.z = 0.08;
+        seg1.castShadow = true;
+        group.add(seg1);
+
+        const seg2 = new THREE.Mesh(new THREE.CylinderGeometry(0.14 * scale, 0.18 * scale, 1.6 * scale, 6), trunkMat);
+        seg2.position.set(0.12 * scale, 2.15 * scale, 0);
+        seg2.rotation.z = 0.16;
+        seg2.castShadow = true;
+        group.add(seg2);
+
+        // 5 radiating palm fronds curving downwards
+        const frondMat = new THREE.MeshStandardMaterial({
+            color: 0x16a34a,
+            flatShading: true,
+            roughness: 0.55
+        });
+        const frondGeo = new THREE.ConeGeometry(0.55 * scale, 2.0 * scale, 4);
+
+        for (let i = 0; i < 5; i++) {
+            const angle = (i / 5) * Math.PI * 2;
+            const frond = new THREE.Mesh(frondGeo, frondMat);
+            frond.position.set(0.25 * scale, 3.0 * scale, 0);
+            frond.rotation.y = angle;
+            frond.rotation.z = 1.15; // droop outward
+            frond.castShadow = true;
+            group.add(frond);
+        }
+
+        // Coconuts
+        const cocoMat = new THREE.MeshStandardMaterial({ color: 0xa16207, roughness: 0.7 });
+        for (let i = 0; i < 3; i++) {
+            const angle = (i / 3) * Math.PI * 2;
+            const coco = new THREE.Mesh(new THREE.SphereGeometry(0.14 * scale, 6, 6), cocoMat);
+            coco.position.set(
+                0.25 * scale + Math.cos(angle) * 0.2 * scale,
+                2.8 * scale,
+                Math.sin(angle) * 0.2 * scale
+            );
+            group.add(coco);
+        }
+
+        group.position.set(x, 0, z);
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+    }
+
+    createPineTree(x, z, scale = 1) {
+        const group = new THREE.Group();
+
+        // Brown trunk
+        const trunkGeo = new THREE.CylinderGeometry(0.14 * scale, 0.22 * scale, 1.6 * scale, 6);
+        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.8 });
+        const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+        trunk.position.y = 0.8 * scale;
+        trunk.castShadow = true;
+        group.add(trunk);
+
+        // 3 stacked tiered cones
+        const coneColors = [0x14532d, 0x166534, 0x15803d];
+        for (let i = 0; i < 3; i++) {
+            const radius = (1.25 - i * 0.28) * scale;
+            const height = (1.3 - i * 0.15) * scale;
+            const coneGeo = new THREE.ConeGeometry(radius, height, 6);
+            const coneMat = new THREE.MeshStandardMaterial({
+                color: coneColors[i],
+                flatShading: true,
+                roughness: 0.6
+            });
+            const cone = new THREE.Mesh(coneGeo, coneMat);
+            cone.position.y = (1.7 + i * 0.85) * scale;
+            cone.castShadow = true;
+            group.add(cone);
+        }
+
+        group.position.set(x, 0, z);
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+    }
+
+    createBush(x, z, scale = 1, flowerColor = 0xf43f5e) {
+        const group = new THREE.Group();
+
+        const bushMat = new THREE.MeshStandardMaterial({
+            color: 0x16a34a,
+            flatShading: true,
+            roughness: 0.7
+        });
+        const mainBush = new THREE.Mesh(new THREE.DodecahedronGeometry(0.7 * scale, 1), bushMat);
+        mainBush.position.y = 0.45 * scale;
+        mainBush.castShadow = true;
+        group.add(mainBush);
+
+        const subBush = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5 * scale, 1), bushMat);
+        subBush.position.set(0.35 * scale, 0.35 * scale, 0.15 * scale);
+        subBush.castShadow = true;
+        group.add(subBush);
+
+        // Blossom accents
+        const flMat = new THREE.MeshStandardMaterial({
+            color: flowerColor,
+            emissive: flowerColor,
+            emissiveIntensity: 0.4,
+            roughness: 0.4
+        });
+        for (let i = 0; i < 3; i++) {
+            const angle = (i / 3) * Math.PI * 2;
+            const blossom = new THREE.Mesh(new THREE.OctahedronGeometry(0.12 * scale, 0), flMat);
+            blossom.position.set(
+                Math.cos(angle) * 0.4 * scale,
+                0.8 * scale,
+                Math.sin(angle) * 0.4 * scale
+            );
+            group.add(blossom);
+        }
+
+        group.position.set(x, 0, z);
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+    }
+
+    createRock(x, z, scale = 1) {
+        const rockGeo = new THREE.DodecahedronGeometry(scale, 0);
+        const rockColors = [0x64748b, 0x475569, 0x94a3b8];
+        const rockMat = new THREE.MeshStandardMaterial({
+            color: rockColors[Math.floor(Math.random() * rockColors.length)],
+            flatShading: true,
+            roughness: 0.85
+        });
+        const rock = new THREE.Mesh(rockGeo, rockMat);
+        rock.position.set(x, scale * 0.45, z);
+        rock.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+        rock.castShadow = true;
+        rock.receiveShadow = true;
+        rock.userData.dynamic = true;
+        this.scene.add(rock);
+        this.meshes.push(rock);
+    }
+
+    createRoadsideFlag(x, z, color = 0x0284c7) {
+        const group = new THREE.Group();
+
+        // Flagpole
+        const poleGeo = new THREE.CylinderGeometry(0.04, 0.05, 3.2, 5);
+        const poleMat = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, metalness: 0.6, roughness: 0.3 });
+        const pole = new THREE.Mesh(poleGeo, poleMat);
+        pole.position.y = 1.6;
+        pole.castShadow = true;
+        group.add(pole);
+
+        // Fluttering banner
+        const flagGeo = new THREE.PlaneGeometry(0.85, 0.55);
+        const flagMat = new THREE.MeshStandardMaterial({
+            color: color,
+            emissive: color,
+            emissiveIntensity: 0.25,
+            side: THREE.DoubleSide
+        });
+        const flag = new THREE.Mesh(flagGeo, flagMat);
+        flag.position.set(x > 0 ? 0.45 : -0.45, 2.8, 0);
+        flag.rotation.y = x > 0 ? 0.3 : -0.3;
+        group.add(flag);
+
+        group.position.set(x, 0, z);
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+    }
+
+    createObelisk(x, z, scale = 1) {
+        const group = new THREE.Group();
+
+        // Base pedestal
+        const baseGeo = new THREE.BoxGeometry(0.8 * scale, 0.4 * scale, 0.8 * scale);
+        const baseMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.7 });
+        const base = new THREE.Mesh(baseGeo, baseMat);
+        base.position.y = 0.2 * scale;
+        group.add(base);
+
+        // Tapered stone pillar
+        const pillarGeo = new THREE.CylinderGeometry(0.24 * scale, 0.38 * scale, 3.4 * scale, 4);
+        const pillarMat = new THREE.MeshStandardMaterial({ color: 0x475569, flatShading: true, roughness: 0.7 });
+        const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+        pillar.position.y = 2.0 * scale;
+        pillar.rotation.y = Math.PI / 4;
+        pillar.castShadow = true;
+        group.add(pillar);
+
+        // Glowing apex crystal
+        const apexGeo = new THREE.OctahedronGeometry(0.22 * scale, 0);
+        const apexMat = new THREE.MeshStandardMaterial({
+            color: 0x00f0ff,
+            emissive: 0x00f0ff,
+            emissiveIntensity: 0.9,
+            metalness: 0.8
+        });
+        const apex = new THREE.Mesh(apexGeo, apexMat);
+        apex.position.y = 3.9 * scale;
+        group.add(apex);
+
+        group.position.set(x, 0, z);
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+    }
+
+    createHotAirBalloons(trackLength) {
+        const balloonConfigs = [
+            { x: -75, y: 44, z: -trackLength * 0.25, scale: 2.2, col1: 0xef4444, col2: 0xfacc15 },
+            { x: 85, y: 52, z: -trackLength * 0.55, scale: 2.6, col1: 0x0284c7, col2: 0xf8fafc },
+            { x: -95, y: 48, z: -trackLength * 0.85, scale: 2.0, col1: 0x8b5cf6, col2: 0xec4899 }
+        ];
+
+        balloonConfigs.forEach(cfg => {
+            const group = new THREE.Group();
+
+            // Main balloon envelope
+            const balloonGeo = new THREE.SphereGeometry(cfg.scale, 12, 10);
+            balloonGeo.scale(1, 1.35, 1);
+            const balloonMat = new THREE.MeshStandardMaterial({
+                color: cfg.col1,
+                roughness: 0.5,
+                flatShading: true
+            });
+            const balloon = new THREE.Mesh(balloonGeo, balloonMat);
+            group.add(balloon);
+
+            // Contrast equatorial stripe ring
+            const stripeGeo = new THREE.TorusGeometry(cfg.scale * 1.01, 0.15 * cfg.scale, 6, 16);
+            const stripeMat = new THREE.MeshStandardMaterial({ color: cfg.col2, roughness: 0.5 });
+            const stripe = new THREE.Mesh(stripeGeo, stripeMat);
+            stripe.rotation.x = Math.PI / 2;
+            group.add(stripe);
+
+            // Passenger wicker basket
+            const basketGeo = new THREE.BoxGeometry(0.7 * cfg.scale, 0.6 * cfg.scale, 0.7 * cfg.scale);
+            const basketMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.9 });
+            const basket = new THREE.Mesh(basketGeo, basketMat);
+            basket.position.y = -1.9 * cfg.scale;
+            group.add(basket);
+
+            group.position.set(cfg.x, cfg.y, cfg.z);
+            group.userData.dynamic = true;
+            this.scene.add(group);
+            this.meshes.push(group);
+        });
     }
 
     createArcadeCrystal(x, z) {
@@ -947,77 +1382,59 @@ export class LevelGenerator {
         this.meshes.push(crystal);
     }
 
-    createTree(x, z) {
-        // Stylized low-poly geometric cyber-palm / tree
-        const group = new THREE.Group();
-        
-        // Minimalist metallic trunk
-        const trunkGeo = new THREE.CylinderGeometry(0.12, 0.2, 2.4, 5);
-        const trunkMat = new THREE.MeshStandardMaterial({ 
-            color: 0x1b2838, 
-            roughness: 0.4, 
-            metalness: 0.6 
-        });
-        const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-        trunk.position.y = 1.2;
-        group.add(trunk);
+    createMountains(trackLength) {
+        // Layer 1: Mid-distance rolling foothills
+        const midColors = [0x255d40, 0x1f4b34, 0x2e6f4d];
+        for (let i = 0; i < 16; i++) {
+            const side = i % 2 === 0 ? 1 : -1;
+            const x = side * (52 + Math.random() * 32);
+            const z = -(Math.random() * (trackLength + 40));
+            const height = 22 + Math.random() * 18;
+            const radius = 14 + Math.random() * 12;
 
-        // Dual-tone low-poly canopy cone
-        const canopyColors = [0x00e676, 0x00b0ff, 0x76ff03, 0x00e5ff];
-        const canopyColor = canopyColors[Math.floor(Math.random() * canopyColors.length)];
-        
-        for (let i = 0; i < 3; i++) {
-            const coneGeo = new THREE.ConeGeometry(1.2 - i * 0.25, 1.2, 5);
-            const coneMat = new THREE.MeshStandardMaterial({
-                color: canopyColor,
-                emissive: canopyColor,
-                emissiveIntensity: 0.15,
+            const hillGeo = new THREE.ConeGeometry(radius, height, 5);
+            const hillMat = new THREE.MeshStandardMaterial({
+                color: midColors[Math.floor(Math.random() * midColors.length)],
                 flatShading: true,
-                roughness: 0.5
+                roughness: 0.9
             });
-            const cone = new THREE.Mesh(coneGeo, coneMat);
-            cone.position.y = 2.2 + i * 0.75;
-            group.add(cone);
+            const hill = new THREE.Mesh(hillGeo, hillMat);
+            hill.position.set(x, height * 0.4, z);
+            hill.userData.dynamic = true;
+            this.scene.add(hill);
+            this.meshes.push(hill);
         }
 
-        group.position.set(x, 0, z);
-        group.userData.dynamic = true;
-        this.scene.add(group);
-        this.meshes.push(group);
-    }
-
-    createMountains(trackLength) {
-        const mountainColors = [0x1a233a, 0x24344d, 0x0d1b2a];
-        
-        for (let i = 0; i < 14; i++) {
+        // Layer 2: Distant majestic alpine mountains with crisp snow caps
+        const mountainColors = [0x1e293b, 0x334155, 0x0f172a];
+        for (let i = 0; i < 18; i++) {
             const side = i % 2 === 0 ? 1 : -1;
-            const x = side * (45 + Math.random() * 35);
-            const z = -(Math.random() * trackLength);
-            const height = 18 + Math.random() * 24;
-            const radius = 10 + Math.random() * 12;
-            
-            const mountainGeo = new THREE.ConeGeometry(radius, height, 5);
+            const x = side * (90 + Math.random() * 65);
+            const z = -(Math.random() * (trackLength + 80)) + 30;
+            const height = 48 + Math.random() * 32;
+            const radius = 22 + Math.random() * 16;
+
+            const mountainGeo = new THREE.ConeGeometry(radius, height, 6);
             const mountainMat = new THREE.MeshStandardMaterial({ 
                 color: mountainColors[Math.floor(Math.random() * mountainColors.length)],
                 flatShading: true,
                 roughness: 0.9
             });
             const mountain = new THREE.Mesh(mountainGeo, mountainMat);
-            mountain.position.set(x, height * 0.4, z);
+            mountain.position.set(x, height * 0.42, z);
             mountain.userData.dynamic = true;
             this.scene.add(mountain);
             this.meshes.push(mountain);
 
-            // Glowing neon ridge line / peak cap
-            const peakGeo = new THREE.ConeGeometry(radius * 0.25, height * 0.2, 5);
+            // Clean white snow cap peak
+            const peakGeo = new THREE.ConeGeometry(radius * 0.32, height * 0.28, 6);
             const peakMat = new THREE.MeshStandardMaterial({ 
-                color: 0x00f0ff,
-                emissive: 0x00e5ff,
-                emissiveIntensity: 0.35,
-                flatShading: true
+                color: 0xf8fafc,
+                flatShading: true,
+                roughness: 0.4
             });
             const peak = new THREE.Mesh(peakGeo, peakMat);
-            peak.position.set(x, height * 0.8, z);
+            peak.position.set(x, height * 0.78, z);
             peak.userData.dynamic = true;
             this.scene.add(peak);
             this.meshes.push(peak);
@@ -1025,32 +1442,32 @@ export class LevelGenerator {
     }
 
     createClouds(trackLength) {
-        for (let i = 0; i < 18; i++) {
+        for (let i = 0; i < 26; i++) {
             const group = new THREE.Group();
             const cloudMat = new THREE.MeshStandardMaterial({ 
                 color: 0xffffff, 
                 transparent: true, 
-                opacity: 0.88,
+                opacity: 0.92,
                 roughness: 0.3,
                 flatShading: true
             });
 
-            const numPuffs = 3 + Math.floor(Math.random() * 3);
+            const numPuffs = 4 + Math.floor(Math.random() * 3);
             for (let j = 0; j < numPuffs; j++) {
-                const puffGeo = new THREE.DodecahedronGeometry(1.6 + Math.random() * 1.6, 0);
+                const puffGeo = new THREE.DodecahedronGeometry(2.0 + Math.random() * 1.8, 0);
                 const puff = new THREE.Mesh(puffGeo, cloudMat);
                 puff.position.set(
-                    j * 2.2,
-                    Math.random() * 0.6,
-                    Math.random() * 0.8
+                    (j - numPuffs / 2) * 2.4,
+                    Math.random() * 0.8,
+                    Math.random() * 1.0
                 );
                 group.add(puff);
             }
 
             group.position.set(
-                (Math.random() - 0.5) * 80,
-                24 + Math.random() * 16,
-                -(Math.random() * trackLength)
+                (Math.random() - 0.5) * 160,
+                30 + Math.random() * 22,
+                -(Math.random() * (trackLength + 60)) + 20
             );
             group.userData.dynamic = true;
             this.scene.add(group);

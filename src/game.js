@@ -34,12 +34,12 @@ export class Game {
         this.equippedSkin = 'blue';
         
         this.themes = [
-            { id: 'default', name: 'Arcade Day', colors: ['#040d21','#07234a','#0284c7','#38bdf8','#e0f2fe'], fog: 0x38bdf8, ground: 0x0f281e, price: 0, owned: true },
-            { id: 'sunset', name: 'Cyber Sunset', colors: ['#18031e','#6b114d','#d946ef','#fb923c','#fef08a'], fog: 0xd946ef, ground: 0x24111d, price: 15, owned: false },
-            { id: 'night', name: 'Neon Night', colors: ['#02040a','#060e1d','#0c1f3d','#153460','#1d4ed8'], fog: 0x0c1f3d, ground: 0x07111e, price: 15, owned: false },
-            { id: 'candy', name: 'Sugar Rush', colors: ['#3b0764','#831843','#f43f5e','#fb7185','#fce7f3'], fog: 0xf43f5e, ground: 0x19271e, price: 20, owned: false },
-            { id: 'ocean', name: 'Aqua Surge', colors: ['#021424','#042f4e','#086a9e','#06b6d4','#67e8f9'], fog: 0x086a9e, ground: 0x07282b, price: 20, owned: false },
-            { id: 'volcano', name: 'Magma Core', colors: ['#160303','#450a0a','#991b1b','#ea580c','#f97316'], fog: 0x991b1b, ground: 0x1f0e0c, price: 25, owned: false },
+            { id: 'default', name: 'Arcade Day', colors: ['#0284c7','#38bdf8','#7dd3fc','#bae6fd','#e0f2fe'], fog: 0x7dd3fc, ground: 0x3d9959, price: 0, owned: true },
+            { id: 'sunset', name: 'Cyber Sunset', colors: ['#4c0519','#9f1239','#e11d48','#fb923c','#fef08a'], fog: 0xfb7185, ground: 0x881337, price: 15, owned: false },
+            { id: 'night', name: 'Neon Night', colors: ['#0a192f','#172a45','#1e3a8a','#2563eb','#38bdf8'], fog: 0x1e3a8a, ground: 0x0f2d24, price: 15, owned: false },
+            { id: 'candy', name: 'Sugar Rush', colors: ['#4a044e','#a21caf','#e879f9','#f472b6','#fce7f3'], fog: 0xf472b6, ground: 0x22543d, price: 20, owned: false },
+            { id: 'ocean', name: 'Aqua Surge', colors: ['#082f49','#0369a1','#0284c7','#38bdf8','#a5f3fc'], fog: 0x38bdf8, ground: 0x134e4a, price: 20, owned: false },
+            { id: 'volcano', name: 'Magma Core', colors: ['#450a0a','#991b1b','#c2410c','#f97316','#fdba74'], fog: 0xea580c, ground: 0x431407, price: 25, owned: false },
         ];
         this.equippedTheme = 'default';
         
@@ -111,10 +111,10 @@ export class Game {
     }
 
     setupLights() {
-        const ambient = new THREE.AmbientLight(0xffffff, 0.65);
+        const ambient = new THREE.AmbientLight(0xffffff, 0.75);
         this.scene.add(ambient);
 
-        const directional = new THREE.DirectionalLight(0xfff8ee, 1.2);
+        const directional = new THREE.DirectionalLight(0xfff8ee, 1.25);
         directional.position.set(12, 24, 12);
         directional.castShadow = true;
         directional.shadow.mapSize.set(2048, 2048);
@@ -127,28 +127,33 @@ export class Game {
         this.scene.add(directional);
         this.directionalLight = directional;
 
-        // Bright stylized arcade sun
-        const sunGeo = new THREE.SphereGeometry(3.5, 16, 16);
-        const sunMat = new THREE.MeshBasicMaterial({ color: 0xFFE066 });
+        // Bright stylized arcade sun group (follows player in distance)
+        this.sunGroup = new THREE.Group();
+        const sunGeo = new THREE.SphereGeometry(4.2, 16, 16);
+        const sunMat = new THREE.MeshBasicMaterial({ color: 0xFFF066 });
         const sun = new THREE.Mesh(sunGeo, sunMat);
-        sun.position.set(45, 50, -90);
-        this.scene.add(sun);
+        this.sunGroup.add(sun);
 
         // Sun corona glow ring
-        const coronaGeo = new THREE.RingGeometry(3.8, 6.2, 32);
+        const coronaGeo = new THREE.RingGeometry(4.5, 7.5, 32);
         const coronaMat = new THREE.MeshBasicMaterial({ 
-            color: 0xFFF3B0, 
+            color: 0xFFF9C4, 
             transparent: true, 
-            opacity: 0.45,
+            opacity: 0.5,
             side: THREE.DoubleSide
         });
         const corona = new THREE.Mesh(coronaGeo, coronaMat);
-        corona.position.set(45, 50, -89.8);
-        this.scene.add(corona);
+        corona.position.z = 0.2;
+        this.sunGroup.add(corona);
 
-        // Hemisphere light for vibrant outdoor arcade bounce
-        const hemi = new THREE.HemisphereLight(0x38bdf8, 0x141824, 0.45);
+        this.sunGroup.position.set(35, 45, -120);
+        this.scene.add(this.sunGroup);
+
+        // Hemisphere light for vibrant outdoor arcade bounce (sky vs ground)
+        const theme = this.getActiveTheme();
+        const hemi = new THREE.HemisphereLight(theme.fog || 0x7dd3fc, theme.ground || 0x3d9959, 0.55);
         this.scene.add(hemi);
+        this.hemiLight = hemi;
     }
 
     setupInput() {
@@ -295,6 +300,11 @@ export class Game {
         );
         this.directionalLight.target.position.set(this.playerX, 0, -this.trackZ);
         this.directionalLight.target.updateMatrixWorld();
+
+        // Keep sun visible in the sky ahead of the player
+        if (this.sunGroup) {
+            this.sunGroup.position.set(35, 45, -this.trackZ - 120);
+        }
 
         // Check gate collisions
         this.checkGateCollisions();
@@ -655,22 +665,33 @@ export class Game {
 
     applyTheme() {
         const theme = this.getActiveTheme();
-        // Update sky
+        // Update sky gradient background
         const skyCanvas = document.createElement('canvas');
-        skyCanvas.width = 1;
+        skyCanvas.width = 512;
         skyCanvas.height = 512;
         const skyCtx = skyCanvas.getContext('2d');
         const gradient = skyCtx.createLinearGradient(0, 0, 0, 512);
         gradient.addColorStop(0, theme.colors[0]);
-        gradient.addColorStop(0.2, theme.colors[1]);
-        gradient.addColorStop(0.5, theme.colors[2]);
+        gradient.addColorStop(0.25, theme.colors[1]);
+        gradient.addColorStop(0.55, theme.colors[2]);
         gradient.addColorStop(0.8, theme.colors[3]);
         gradient.addColorStop(1.0, theme.colors[4]);
         skyCtx.fillStyle = gradient;
-        skyCtx.fillRect(0, 0, 1, 512);
+        skyCtx.fillRect(0, 0, 512, 512);
         const skyTexture = new THREE.CanvasTexture(skyCanvas);
+        skyTexture.colorSpace = THREE.SRGBColorSpace;
         this.scene.background = skyTexture;
-        this.scene.fog = new THREE.FogExp2(theme.fog, 0.006);
+        if (this.renderer) {
+            this.renderer.setClearColor(theme.fog || 0x7dd3fc, 1);
+        }
+        // Linear fog keeps the track, gates, crowd and enemies crisp up to 110 units ahead,
+        // while softly blending the distant scenery into the sky between 110 and 280 units
+        this.scene.fog = new THREE.Fog(theme.fog || 0x7dd3fc, 110, 280);
+
+        if (this.hemiLight) {
+            this.hemiLight.color.setHex(theme.fog || 0x7dd3fc);
+            this.hemiLight.groundColor.setHex(theme.ground || 0x3d9959);
+        }
     }
 
     saveProgress() {
