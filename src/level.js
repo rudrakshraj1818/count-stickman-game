@@ -346,32 +346,76 @@ export class LevelGenerator {
     }
 
     generateGatePair(level) {
-        const ops = ['+', '*', '-'];
-        const leftOp = ops[Math.floor(Math.random() * 2)]; // Prefer + and *
-        let rightOp = ops[Math.floor(Math.random() * 3)];
+        const types = ['xp', 'coins', 'hp', 'armor', 'hazard'];
         
-        // Ensure variety
-        if (rightOp === leftOp) rightOp = ops[(ops.indexOf(rightOp) + 1) % ops.length];
+        // Pick left gate
+        const leftType = types[Math.floor(Math.random() * 4)]; // Prefer positive buffs (xp, coins, hp, armor)
+        let rightType = types[Math.floor(Math.random() * types.length)];
+        if (rightType === leftType) {
+            rightType = types[(types.indexOf(rightType) + 1) % types.length];
+        }
 
-        const getValue = (op) => {
-            switch (op) {
-                case '+': return Math.floor(Math.random() * (5 + level * 2)) + 3;
-                case '*': return Math.floor(Math.random() * 2) + 2;
-                case '-': return Math.floor(Math.random() * (3 + level)) + 2;
-                default: return 2;
+        const createGateData = (type) => {
+            switch (type) {
+                case 'xp':
+                    return {
+                        type: 'xp',
+                        value: (Math.floor(Math.random() * 3) + 2) * 25, // 50, 75, 100 XP
+                        subtag: '★ HERO XP ★',
+                        color: '#00e5ff',
+                        hexColor: 0x00e5ff,
+                        emissiveHex: 0x00b0ff
+                    };
+                case 'coins':
+                    return {
+                        type: 'coins',
+                        value: (Math.floor(Math.random() * 3) + 1) * 10, // 10, 20, 30 Coins
+                        subtag: '★ GOLD LOOT ★',
+                        color: '#ffd700',
+                        hexColor: 0xffd700,
+                        emissiveHex: 0xffab00
+                    };
+                case 'hp':
+                    return {
+                        type: 'hp',
+                        value: (Math.floor(Math.random() * 3) + 2) * 10, // 20, 30, 40 HP
+                        subtag: '♥ HEALTH SURGE ♥',
+                        color: '#00e676',
+                        hexColor: 0x00e676,
+                        emissiveHex: 0x00c853
+                    };
+                case 'armor':
+                    return {
+                        type: 'armor',
+                        value: (Math.floor(Math.random() * 3) + 1) * 10, // 10, 20, 30 Armor
+                        subtag: '🛡 SHIELD BUFF 🛡',
+                        color: '#ab47bc',
+                        hexColor: 0xab47bc,
+                        emissiveHex: 0x8e24aa
+                    };
+                case 'hazard':
+                default:
+                    return {
+                        type: 'hazard',
+                        value: (Math.floor(Math.random() * 2) + 1) * 15, // -15 or -30 HP
+                        subtag: '⚠ HAZARD TRAP ⚠',
+                        color: '#ff1744',
+                        hexColor: 0xff1744,
+                        emissiveHex: 0xd50000
+                    };
             }
         };
 
         return {
-            left: { op: leftOp, value: getValue(leftOp) },
-            right: { op: rightOp, value: getValue(rightOp) }
+            left: createGateData(leftType),
+            right: createGateData(rightType)
         };
     }
 
     createGateMesh(gateData, x, z, meshCollector = null) {
-        const isGood = gateData.op === '+' || gateData.op === '*';
-        const primaryColor = isGood ? 0x00E676 : 0xFF1744;
-        const emissiveColor = isGood ? 0x00B0FF : 0xD50000;
+        const isHazard = gateData.type === 'hazard';
+        const primaryColor = gateData.hexColor || 0x00e5ff;
+        const emissiveColor = gateData.emissiveHex || 0x00b0ff;
         
         // 1. Sleek metallic archway frame
         const frameMat = new THREE.MeshStandardMaterial({ 
@@ -382,7 +426,7 @@ export class LevelGenerator {
         const glowPipingMat = new THREE.MeshStandardMaterial({ 
             color: primaryColor,
             emissive: primaryColor,
-            emissiveIntensity: 0.9
+            emissiveIntensity: 0.95
         });
 
         // Outer pillar
@@ -418,14 +462,14 @@ export class LevelGenerator {
         this.scene.add(beacon);
         this.meshes.push(beacon);
 
-        // 2. Translucent glowing energy field curtain (this is gateMesh for highlight/emissive collision)
+        // 2. Translucent glowing energy field curtain
         const gateGeo = new THREE.BoxGeometry(4.4, 3.8, 0.12);
         const gateMat = new THREE.MeshStandardMaterial({ 
             color: primaryColor,
             emissive: emissiveColor,
-            emissiveIntensity: 0.35,
+            emissiveIntensity: 0.38,
             transparent: true,
-            opacity: 0.72,
+            opacity: 0.75,
             roughness: 0.2
         });
         const gateMesh = new THREE.Mesh(gateGeo, gateMat);
@@ -446,35 +490,40 @@ export class LevelGenerator {
         ctx.roundRect(16, 16, 480, 224, 36);
         ctx.fill();
 
-        ctx.strokeStyle = isGood ? '#00e676' : '#ff1744';
+        ctx.strokeStyle = gateData.color || '#00e5ff';
         ctx.lineWidth = 10;
         ctx.stroke();
 
         // Inner glowing border
-        ctx.strokeStyle = isGood ? 'rgba(0, 230, 118, 0.4)' : 'rgba(255, 23, 68, 0.4)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
         ctx.lineWidth = 4;
         ctx.stroke();
 
-        // Sub-tag label (e.g. ★ MULTIPLY ★ or ⚠ HAZARD ⚠)
-        ctx.fillStyle = isGood ? '#69f0ae' : '#ff8a80';
-        ctx.font = '900 32px system-ui, sans-serif';
+        // Sub-tag label
+        ctx.fillStyle = gateData.color || '#ffffff';
+        ctx.font = '900 30px system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
-        const subtag = gateData.op === '*' ? '★ MULTIPLY ★' 
-                     : gateData.op === '+' ? '▲ RUSH BOOST ▲' 
-                     : gateData.op === '/' ? '⚠ DIVIDE ⚠' 
-                     : '▼ HAZARD ▼';
-        ctx.fillText(subtag, 256, 34);
+        ctx.fillText(gateData.subtag, 256, 36);
 
-        // Main operator & value
+        // Main display value
         ctx.fillStyle = '#ffffff';
-        ctx.font = '900 110px system-ui, sans-serif';
+        ctx.font = '900 85px system-ui, sans-serif';
         ctx.textBaseline = 'middle';
-        ctx.shadowColor = isGood ? '#00e676' : '#ff1744';
-        ctx.shadowBlur = 25;
-        ctx.fillText(`${gateData.op}${gateData.value}`, 256, 148);
+        ctx.shadowColor = gateData.color || '#00e5ff';
+        ctx.shadowBlur = 24;
+
+        let mainText = '';
+        if (gateData.type === 'xp') mainText = `+${gateData.value} XP`;
+        else if (gateData.type === 'coins') mainText = `+${gateData.value} 🪙`;
+        else if (gateData.type === 'hp') mainText = `+${gateData.value} HP`;
+        else if (gateData.type === 'armor') mainText = `+${gateData.value} SHIELD`;
+        else mainText = `-${gateData.value} HP`;
+
+        ctx.fillText(mainText, 256, 148);
 
         const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
         const labelGeo = new THREE.PlaneGeometry(3.6, 1.8);
         const labelMat = new THREE.MeshBasicMaterial({ 
             map: texture, 

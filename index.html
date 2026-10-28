@@ -14,16 +14,18 @@
         
         <!-- HUD -->
         <div id="hud">
-            <div id="level-display">Level 1</div>
+            <div id="level-display">Track 1</div>
+            <div id="hero-hp-display">❤️ <span id="hp-text">100/100</span> | 🛡️ <span id="armor-text">25</span></div>
+            <div id="hero-xp-display">⭐ <span id="hero-lvl-text">Lv.1</span> (<span id="xp-text">0/100</span> XP)</div>
             <div id="coin-display">🪙 0</div>
-            <div id="count-display">👥 1</div>
+            <div id="count-display" style="display: none;"></div>
         </div>
         
         <!-- Start Screen -->
         <div id="start-screen" class="screen">
-            <div class="arcade-tag">★ ARCADE RUNNER ★</div>
+            <div class="arcade-tag">★ 3D THIRD-PERSON RUNNER ★</div>
             <h1 class="arcade-title">CROWD RUSH</h1>
-            <p class="start-subtitle">Swipe to steer & multiply your squad!</p>
+            <p class="start-subtitle">Guide your Hero, collect power gates & crush rivals!</p>
             <button id="play-btn" class="btn btn-primary">▶ PLAY NOW</button>
             <div class="menu-sub-btns">
                 <button id="shop-btn" class="btn btn-secondary">🛒 SHOP</button>
@@ -54,14 +56,14 @@
         
         <!-- Upgrade Screen -->
         <div id="upgrade-screen" class="screen hidden">
-            <h2>UPGRADES</h2>
+            <h2>HERO UPGRADES</h2>
             <div class="upgrade-item">
-                <span>Starting Crowd</span>
+                <span>Vitality (HP & Armor)</span>
                 <span id="crowd-level">Lv. 1</span>
                 <button id="upgrade-crowd-btn" class="btn btn-small">🪙 50</button>
             </div>
             <div class="upgrade-item">
-                <span>Strength</span>
+                <span>Weapon Attack Power</span>
                 <span id="strength-level">Lv. 1</span>
                 <button id="upgrade-strength-btn" class="btn btn-small">🪙 75</button>
             </div>
@@ -70,28 +72,28 @@
         
         <!-- Win Screen -->
         <div id="win-screen" class="screen hidden">
-            <h2>🎉 LEVEL COMPLETE!</h2>
+            <h2>🎉 TRACK CLEARED!</h2>
             <p id="win-coins">+0 🪙</p>
             <p id="win-total-coins" style="font-size: 14px; opacity: 0.8;">Total: 🪙 0</p>
             <div id="win-upgrades">
                 <div class="upgrade-item">
-                    <span>Starting Crowd</span>
+                    <span>Vitality (HP & Armor)</span>
                     <span id="win-crowd-level">Lv. 1</span>
                     <button id="win-upgrade-crowd-btn" class="btn btn-small">🪙 50</button>
                 </div>
                 <div class="upgrade-item">
-                    <span>Strength</span>
+                    <span>Weapon Attack Power</span>
                     <span id="win-strength-level">Lv. 1</span>
                     <button id="win-upgrade-strength-btn" class="btn btn-small">🪙 75</button>
                 </div>
             </div>
-            <button id="next-btn" class="btn">NEXT LEVEL →</button>
+            <button id="next-btn" class="btn">NEXT TRACK →</button>
         </div>
         
         <!-- Lose Screen -->
         <div id="lose-screen" class="screen hidden">
-            <h2>💀 DEFEATED!</h2>
-            <p>Your crowd was overwhelmed!</p>
+            <h2>💀 HERO DEFEATED!</h2>
+            <p>Your hero took fatal damage in battle!</p>
             <button id="retry-btn" class="btn">🔄 RETRY</button>
         </div>
     </div>

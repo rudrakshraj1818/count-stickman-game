@@ -4,464 +4,521 @@ export class CrowdManager {
     constructor(scene, game) {
         this.scene = scene;
         this.game = game;
-        this.playerStickmen = [];
-        this.playerGroup = null;
-        this.playerCount = 0;
+        
+        // Single Hero reference
+        this.heroGroup = null;
+        this.heroModel = null;
+        this.heroParts = null;
+        this.prevPlayerX = 0;
+        this.horizontalVel = 0;
+        
         this.animTime = 0;
         this.combatTime = 0;
         this.slashEffects = [];    // Neon sword slash arcs
-        this.flyingBodies = [];    // Ragdoll stickmen flying away
+        this.flyingBodies = [];    // Ragdoll enemy stickmen flying away
         this.impactFlashes = [];   // Impact burst rings
         this.sparkParticles = [];  // Small spark particles
-        this.trailParticles = [];  // Trailing particles behind flying bodies
+        this.trailParticles = [];  // Trailing particles
     }
 
     clear() {
-        if (this.playerGroup) {
-            this.scene.remove(this.playerGroup);
-            this.playerGroup.traverse(child => {
+        if (this.heroGroup) {
+            this.scene.remove(this.heroGroup);
+            this.heroGroup.traverse(child => {
                 if (child.geometry) child.geometry.dispose();
-                if (child.material) child.material.dispose();
+                if (child.material) {
+                    if (Array.isArray(child.material)) {
+                        child.material.forEach(m => m.dispose());
+                    } else {
+                        child.material.dispose();
+                    }
+                }
             });
         }
-        this.playerStickmen = [];
-        this.playerGroup = null;
-        this.playerCount = 0;
-        
-        // Clean up effects
+        this.heroGroup = null;
+        this.heroModel = null;
+        this.heroParts = null;
+
+        // Clean up visual effects
         this.slashEffects.forEach(s => { 
             this.scene.remove(s.mesh);
             if (s.mesh.geometry) s.mesh.geometry.dispose();
             if (s.mesh.material) s.mesh.material.dispose();
         });
         this.slashEffects = [];
-        this.flyingBodies.forEach(b => { this.scene.remove(b.mesh); });
+
+        this.flyingBodies.forEach(b => { 
+            this.scene.remove(b.mesh); 
+            b.mesh.traverse(c => {
+                if (c.geometry) c.geometry.dispose();
+                if (c.material) c.material.dispose();
+            });
+        });
         this.flyingBodies = [];
-        this.impactFlashes.forEach(f => { this.scene.remove(f.mesh); });
+
+        this.impactFlashes.forEach(f => { 
+            this.scene.remove(f.mesh);
+            if (f.mesh.geometry) f.mesh.geometry.dispose();
+            if (f.mesh.material) f.mesh.material.dispose();
+        });
         this.impactFlashes = [];
-        this.sparkParticles.forEach(p => { this.scene.remove(p.mesh); });
+
+        this.sparkParticles.forEach(p => { 
+            this.scene.remove(p.mesh); 
+            if (p.mesh.geometry) p.mesh.geometry.dispose();
+            if (p.mesh.material) p.mesh.material.dispose();
+        });
         this.sparkParticles = [];
-        this.trailParticles.forEach(p => { this.scene.remove(p.mesh); });
+
+        this.trailParticles.forEach(p => { 
+            this.scene.remove(p.mesh); 
+            if (p.mesh.geometry) p.mesh.geometry.dispose();
+            if (p.mesh.material) p.mesh.material.dispose();
+        });
         this.trailParticles = [];
     }
 
-    createPlayerCrowd(count) {
+    // ============ CREATE SINGLE PLAYABLE HERO ============
+    createPlayerCrowd() {
         this.clear();
-        this.playerCount = count;
-        this.playerGroup = new THREE.Group();
-        this.playerGroup.userData.dynamic = true;
-
-        for (let i = 0; i < count; i++) {
-            this.addStickmanToGroup(i);
-        }
-
-        this.scene.add(this.playerGroup);
+        this.createHero();
     }
 
-    addStickmanToGroup(index) {
-        let color;
-        if (this.game && this.game.equippedSkin === 'rainbow') {
-            const rainbowColors = [0xFF1744, 0xFF9100, 0xFFEA00, 0x00E676, 0x2979FF, 0xD500F9];
-            color = rainbowColors[index % rainbowColors.length];
-        } else {
-            color = this.game ? this.game.getPlayerColor() : 0x2196F3;
-        }
-        const stickman = this.createStickman(color, false);
-        const pos = this.getFormationPosition(index);
-        stickman.position.set(pos.x, 0, pos.z);
-        stickman.userData.index = index;
-        stickman.userData.basePos = { x: pos.x, z: pos.z };
-        stickman.userData.targetCombatPos = { x: pos.x, z: pos.z };
-        // Start with a pop-in scale animation
-        stickman.scale.set(0, 0, 0);
-        stickman.userData.spawnTime = this.animTime;
-        stickman.userData.spawning = true;
-        if (!this.playerGroup) {
-            this.playerGroup = new THREE.Group();
-            this.playerGroup.userData.dynamic = true;
-            this.scene.add(this.playerGroup);
-        }
-        this.playerGroup.add(stickman);
-        this.playerStickmen.push(stickman);
-    }
+    createHero() {
+        this.heroGroup = new THREE.Group();
+        this.heroGroup.userData.dynamic = true;
 
-    getFormationPosition(index) {
-        if (index === 0) return { x: 0, z: 0 };
-        const angle = index * 2.4;
-        const radius = Math.sqrt(index) * 0.4;
-        return {
-            x: Math.cos(angle) * radius,
-            z: Math.sin(angle) * radius * 0.6
-        };
-    }
+        this.heroModel = new THREE.Group();
+        this.heroGroup.add(this.heroModel);
 
-    createStickman(color, isEnemy = false) {
-        const group = new THREE.Group();
-
-        if (isEnemy) {
-            // ============ ENEMY RIVAL RAIDER ============
-            const mat = new THREE.MeshStandardMaterial({ 
-                color: color || 0x880e4f,
-                roughness: 0.45,
-                metalness: 0.6
-            });
-            const darkArmorMat = new THREE.MeshStandardMaterial({ color: 0x181a24, roughness: 0.5, metalness: 0.8 });
-            const evilGlowMat = new THREE.MeshStandardMaterial({
-                color: 0xff1744,
-                emissive: 0xff1744,
-                emissiveIntensity: 1.1
-            });
-
-            // 1. Armored Body
-            const bodyGeo = new THREE.CapsuleGeometry(0.16, 0.48, 6, 6);
-            const body = new THREE.Mesh(bodyGeo, mat);
-            body.position.y = 0.7;
-            body.castShadow = true;
-
-            // Spiked Pauldrons
-            const spikeGeo = new THREE.ConeGeometry(0.06, 0.18, 4);
-            const leftSpike = new THREE.Mesh(spikeGeo, darkArmorMat);
-            leftSpike.position.set(-0.2, 0.22, 0);
-            leftSpike.rotation.z = 0.5;
-            body.add(leftSpike);
-
-            const rightSpike = new THREE.Mesh(spikeGeo, darkArmorMat);
-            rightSpike.position.set(0.2, 0.22, 0);
-            rightSpike.rotation.z = -0.5;
-            body.add(rightSpike);
-
-            // Glowing Evil Chest Core
-            const coreGeo = new THREE.BoxGeometry(0.12, 0.16, 0.08);
-            const core = new THREE.Mesh(coreGeo, evilGlowMat);
-            core.position.set(0, 0.04, 0.12);
-            body.add(core);
-            group.add(body);
-
-            // 2. Horned Raider Helmet
-            const headGeo = new THREE.SphereGeometry(0.22, 10, 10);
-            const head = new THREE.Mesh(headGeo, mat);
-            head.position.y = 1.22;
-            head.castShadow = true;
-
-            // Evil Horns
-            const hornGeo = new THREE.ConeGeometry(0.05, 0.22, 4);
-            const leftHorn = new THREE.Mesh(hornGeo, darkArmorMat);
-            leftHorn.position.set(-0.14, 0.18, -0.04);
-            leftHorn.rotation.z = 0.4;
-            leftHorn.rotation.x = -0.2;
-            head.add(leftHorn);
-
-            const rightHorn = new THREE.Mesh(hornGeo, darkArmorMat);
-            rightHorn.position.set(0.14, 0.18, -0.04);
-            rightHorn.rotation.z = -0.4;
-            rightHorn.rotation.x = -0.2;
-            head.add(rightHorn);
-
-            // Fiery Slit Visor
-            const visorGeo = new THREE.BoxGeometry(0.28, 0.07, 0.14);
-            const visor = new THREE.Mesh(visorGeo, evilGlowMat);
-            visor.position.set(0, 0.02, 0.12);
-            head.add(visor);
-            group.add(head);
-
-            // 3. Heavy Armored Legs
-            const legGeo = new THREE.CapsuleGeometry(0.07, 0.3, 4, 4);
-            const leftLeg = new THREE.Mesh(legGeo, mat);
-            leftLeg.position.set(-0.1, 0.2, 0);
-            const leftBoot = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.08, 0.17), darkArmorMat);
-            leftBoot.position.set(0, -0.15, 0.04);
-            leftLeg.add(leftBoot);
-            group.add(leftLeg);
-
-            const rightLeg = new THREE.Mesh(legGeo, mat);
-            rightLeg.position.set(0.1, 0.2, 0);
-            const rightBoot = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.08, 0.17), darkArmorMat);
-            rightBoot.position.set(0, -0.15, 0.04);
-            rightLeg.add(rightBoot);
-            group.add(rightLeg);
-
-            // 4. Left Arm & Spiked War Buckler
-            const armGeo = new THREE.CapsuleGeometry(0.055, 0.25, 4, 4);
-            const leftArm = new THREE.Mesh(armGeo, mat);
-            leftArm.position.set(-0.25, 0.75, 0);
-            leftArm.rotation.z = 0.3;
-
-            // Spiked Buckler
-            const shieldGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.04, 6);
-            const shield = new THREE.Mesh(shieldGeo, darkArmorMat);
-            shield.position.set(-0.06, -0.06, 0.08);
-            shield.rotation.y = Math.PI / 2;
-            const shieldSpike = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.14, 4), evilGlowMat);
-            shieldSpike.position.set(0, 0.08, 0);
-            shieldSpike.rotation.x = Math.PI / 2;
-            shield.add(shieldSpike);
-            leftArm.add(shield);
-            group.add(leftArm);
-
-            // 5. Right Arm & Brutal Jagged Raider Cleaver / Axe
-            const rightArm = new THREE.Mesh(armGeo, mat);
-            rightArm.position.set(0.25, 0.75, 0);
-            rightArm.rotation.z = -0.3;
-
-            // Weapon handle
-            const axeGroup = new THREE.Group();
-            const handleGeo = new THREE.CylinderGeometry(0.025, 0.025, 0.38, 5);
-            const handle = new THREE.Mesh(handleGeo, darkArmorMat);
-            axeGroup.add(handle);
-
-            // Jagged axe blade
-            const bladeGeo = new THREE.BoxGeometry(0.18, 0.22, 0.03);
-            const blade = new THREE.Mesh(bladeGeo, darkArmorMat);
-            blade.position.set(0.1, 0.12, 0);
-            axeGroup.add(blade);
-
-            // Red glowing cutting edge
-            const edgeGeo = new THREE.BoxGeometry(0.04, 0.24, 0.04);
-            const edge = new THREE.Mesh(edgeGeo, evilGlowMat);
-            edge.position.set(0.19, 0.12, 0);
-            axeGroup.add(edge);
-
-            axeGroup.position.set(0.04, -0.12, 0.12);
-            axeGroup.rotation.x = Math.PI / 3;
-            rightArm.add(axeGroup);
-            group.add(rightArm);
-
-            // Store part references
-            group.userData.body = body;
-            group.userData.head = head;
-            group.userData.leftLeg = leftLeg;
-            group.userData.rightLeg = rightLeg;
-            group.userData.leftArm = leftArm;
-            group.userData.rightArm = rightArm;
-            group.userData.weapon = axeGroup;
-            group.userData.shield = shield;
-            group.userData.isEnemy = true;
-            group.userData.hitReact = 0;
-
-            return group;
-        }
-
-        // ============ FRIENDLY CHAMPION RUNNER ============
-        const mat = new THREE.MeshStandardMaterial({ 
-            color,
+        const skinColor = this.game ? this.game.getPlayerColor() : 0x2196F3;
+        
+        // Materials
+        const heroMat = new THREE.MeshStandardMaterial({
+            color: skinColor,
             roughness: 0.35,
-            metalness: 0.25
+            metalness: 0.5
         });
-        const whiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
-        const cyanGlowMat = new THREE.MeshStandardMaterial({
+
+        const darkArmorMat = new THREE.MeshStandardMaterial({
+            color: 0x181e2e,
+            roughness: 0.45,
+            metalness: 0.85
+        });
+
+        const goldTrimMat = new THREE.MeshStandardMaterial({
+            color: 0xffd700,
+            roughness: 0.25,
+            metalness: 0.95
+        });
+
+        const glowingVisorMat = new THREE.MeshStandardMaterial({
             color: 0x00f0ff,
-            emissive: 0x00f0ff,
-            emissiveIntensity: 0.95,
-            roughness: 0.1
-        });
-        const darkArmorMat = new THREE.MeshStandardMaterial({ color: 0x1b2838, roughness: 0.4, metalness: 0.7 });
-
-        // 1. Body (child 0)
-        const bodyGeo = new THREE.CapsuleGeometry(0.16, 0.48, 6, 6);
-        const body = new THREE.Mesh(bodyGeo, mat);
-        body.position.y = 0.7;
-        body.castShadow = true;
-
-        // Runner chest energy core
-        const coreGeo = new THREE.BoxGeometry(0.14, 0.18, 0.08);
-        const core = new THREE.Mesh(coreGeo, cyanGlowMat);
-        core.position.set(0, 0.05, 0.12);
-        body.add(core);
-
-        // Hero Aerodynamic Shoulder Armor Guards
-        const shoulderGeo = new THREE.SphereGeometry(0.08, 6, 6);
-        const leftShoulder = new THREE.Mesh(shoulderGeo, whiteMat);
-        leftShoulder.position.set(-0.2, 0.22, 0);
-        leftShoulder.scale.set(1.2, 0.8, 1);
-        body.add(leftShoulder);
-
-        const rightShoulder = new THREE.Mesh(shoulderGeo, whiteMat);
-        rightShoulder.position.set(0.2, 0.22, 0);
-        rightShoulder.scale.set(1.2, 0.8, 1);
-        body.add(rightShoulder);
-
-        // Runner booster / jetpack
-        const packGeo = new THREE.BoxGeometry(0.2, 0.24, 0.1);
-        const pack = new THREE.Mesh(packGeo, darkArmorMat);
-        pack.position.set(0, 0.05, -0.12);
-
-        // Twin nozzles
-        const nozzleGeo = new THREE.CylinderGeometry(0.035, 0.045, 0.07, 6);
-        const nozzleL = new THREE.Mesh(nozzleGeo, cyanGlowMat);
-        nozzleL.position.set(-0.06, -0.13, 0);
-        pack.add(nozzleL);
-        const nozzleR = new THREE.Mesh(nozzleGeo, cyanGlowMat);
-        nozzleR.position.set(0.06, -0.13, 0);
-        pack.add(nozzleR);
-        body.add(pack);
-
-        group.add(body); // children[0]
-
-        // 2. Head (child 1)
-        const headGeo = new THREE.SphereGeometry(0.22, 10, 10);
-        const head = new THREE.Mesh(headGeo, mat);
-        head.position.y = 1.22;
-        head.castShadow = true;
-
-        // Sleek aerodynamic cyber-visor
-        const visorGeo = new THREE.BoxGeometry(0.3, 0.1, 0.16);
-        const visorMat = new THREE.MeshStandardMaterial({
-            color: 0x0d1b2a,
             emissive: 0x00e5ff,
-            emissiveIntensity: 0.85,
-            roughness: 0.1,
-            metalness: 0.8
+            emissiveIntensity: 1.2
         });
-        const visor = new THREE.Mesh(visorGeo, visorMat);
-        visor.position.set(0, 0.02, 0.12);
-        head.add(visor);
 
-        // Champion headband
-        const bandGeo = new THREE.CylinderGeometry(0.23, 0.23, 0.05, 12, 1, true);
-        const band = new THREE.Mesh(bandGeo, whiteMat);
-        band.position.set(0, 0.05, 0);
-        head.add(band);
+        const energyCoreMat = new THREE.MeshStandardMaterial({
+            color: 0x00f0ff,
+            emissive: 0x00d0ff,
+            emissiveIntensity: 1.0
+        });
 
-        // Hero crest
-        const crestGeo = new THREE.BoxGeometry(0.04, 0.1, 0.16);
-        const crest = new THREE.Mesh(crestGeo, cyanGlowMat);
-        crest.position.set(0, 0.2, -0.04);
-        head.add(crest);
+        // 1. Soft Contact Shadow grounded flush beneath hero
+        const shadowGeo = new THREE.CircleGeometry(0.58, 20);
+        const shadowMat = new THREE.MeshBasicMaterial({
+            color: 0x000511,
+            transparent: true,
+            opacity: 0.45,
+            depthWrite: false
+        });
+        const shadow = new THREE.Mesh(shadowGeo, shadowMat);
+        shadow.rotation.x = -Math.PI / 2;
+        shadow.position.y = 0.02;
+        this.heroGroup.add(shadow);
 
-        group.add(head); // children[1]
+        // 2. Armored Torso / Chestplate
+        const torsoGeo = new THREE.CapsuleGeometry(0.22, 0.52, 8, 8);
+        const torso = new THREE.Mesh(torsoGeo, heroMat);
+        torso.position.y = 0.85;
+        torso.castShadow = true;
+        this.heroModel.add(torso);
 
-        // 3. Left Leg (child 2)
-        const legGeo = new THREE.CapsuleGeometry(0.07, 0.3, 6, 6);
-        const leftLeg = new THREE.Mesh(legGeo, mat);
-        leftLeg.position.set(-0.1, 0.2, 0);
+        // Chest Armor Breastplate
+        const chestPlateGeo = new THREE.BoxGeometry(0.34, 0.36, 0.24);
+        const chestPlate = new THREE.Mesh(chestPlateGeo, darkArmorMat);
+        chestPlate.position.set(0, 0.08, 0.02);
+        torso.add(chestPlate);
 
-        const shoeGeo = new THREE.BoxGeometry(0.1, 0.08, 0.17);
-        const leftShoe = new THREE.Mesh(shoeGeo, whiteMat);
-        leftShoe.position.set(0, -0.15, 0.04);
-        leftLeg.add(leftShoe);
-        group.add(leftLeg); // children[2]
+        // Glowing Core Crest on chestplate
+        const coreGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.06, 6);
+        const core = new THREE.Mesh(coreGeo, energyCoreMat);
+        core.position.set(0, 0.08, 0.14);
+        core.rotation.x = Math.PI / 2;
+        torso.add(core);
 
-        // 4. Right Leg (child 3)
-        const rightLeg = new THREE.Mesh(legGeo, mat);
-        rightLeg.position.set(0.1, 0.2, 0);
+        // Armored Belt
+        const beltGeo = new THREE.CylinderGeometry(0.25, 0.25, 0.08, 12);
+        const belt = new THREE.Mesh(beltGeo, darkArmorMat);
+        belt.position.set(0, -0.22, 0);
+        torso.add(belt);
 
-        const rightShoe = new THREE.Mesh(shoeGeo, whiteMat);
-        rightShoe.position.set(0, -0.15, 0.04);
-        rightLeg.add(rightShoe);
-        group.add(rightLeg); // children[3]
+        const buckleGeo = new THREE.BoxGeometry(0.12, 0.1, 0.1);
+        const buckle = new THREE.Mesh(buckleGeo, goldTrimMat);
+        buckle.position.set(0, -0.22, 0.14);
+        torso.add(buckle);
 
-        // 5. Left Arm (child 4) & Hero Buckler Shield
-        const armGeo = new THREE.CapsuleGeometry(0.05, 0.25, 4, 4);
-        const leftArm = new THREE.Mesh(armGeo, mat);
-        leftArm.position.set(-0.25, 0.75, 0);
-        leftArm.rotation.z = 0.3;
+        // 3. Knight-Runner Helmet Head & Winged Crest
+        const headGroup = new THREE.Group();
+        headGroup.position.set(0, 1.4, 0);
 
-        const cuffGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.07, 6);
-        const leftCuff = new THREE.Mesh(cuffGeo, whiteMat);
-        leftCuff.position.set(0, -0.09, 0);
-        leftArm.add(leftCuff);
+        const headGeo = new THREE.SphereGeometry(0.23, 12, 12);
+        const head = new THREE.Mesh(headGeo, heroMat);
+        head.castShadow = true;
+        headGroup.add(head);
+
+        // Helmet brow guard
+        const browGeo = new THREE.BoxGeometry(0.32, 0.1, 0.28);
+        const brow = new THREE.Mesh(browGeo, darkArmorMat);
+        brow.position.set(0, 0.1, 0.02);
+        headGroup.add(brow);
+
+        // Glowing Visor Line
+        const visorGeo = new THREE.BoxGeometry(0.28, 0.065, 0.14);
+        const visor = new THREE.Mesh(visorGeo, glowingVisorMat);
+        visor.position.set(0, 0.02, 0.14);
+        headGroup.add(visor);
+
+        // Winged crest on helmet
+        const crownCrestGeo = new THREE.ConeGeometry(0.06, 0.28, 4);
+        const crownCrest = new THREE.Mesh(crownCrestGeo, goldTrimMat);
+        crownCrest.position.set(0, 0.28, 0.04);
+        crownCrest.rotation.x = -0.3;
+        headGroup.add(crownCrest);
+
+        const wingGeo = new THREE.ConeGeometry(0.045, 0.22, 4);
+        const leftWing = new THREE.Mesh(wingGeo, goldTrimMat);
+        leftWing.position.set(-0.16, 0.18, -0.04);
+        leftWing.rotation.z = 0.6;
+        leftWing.rotation.x = -0.2;
+        headGroup.add(leftWing);
+
+        const rightWing = new THREE.Mesh(wingGeo, goldTrimMat);
+        rightWing.position.set(0.16, 0.18, -0.04);
+        rightWing.rotation.z = -0.6;
+        rightWing.rotation.x = -0.2;
+        headGroup.add(rightWing);
+
+        this.heroModel.add(headGroup);
+
+        // 4. Spaulders (Shoulder Pauldrons)
+        const pauldronGeo = new THREE.SphereGeometry(0.12, 8, 8, 0, Math.PI);
+        const leftPauldron = new THREE.Mesh(pauldronGeo, goldTrimMat);
+        leftPauldron.position.set(-0.28, 1.15, 0);
+        leftPauldron.rotation.z = -Math.PI / 2;
+        this.heroModel.add(leftPauldron);
+
+        const rightPauldron = new THREE.Mesh(pauldronGeo, goldTrimMat);
+        rightPauldron.position.set(0.28, 1.15, 0);
+        rightPauldron.rotation.z = Math.PI / 2;
+        this.heroModel.add(rightPauldron);
+
+        // 5. Left Arm with Heroic Guard Buckler / Shield
+        const leftArmGroup = new THREE.Group();
+        leftArmGroup.position.set(-0.32, 1.12, 0);
+
+        const armGeo = new THREE.CapsuleGeometry(0.065, 0.32, 6, 6);
+        const leftArm = new THREE.Mesh(armGeo, heroMat);
+        leftArm.position.y = -0.16;
+        leftArm.castShadow = true;
+        leftArmGroup.add(leftArm);
 
         // Hero Buckler Shield
         const shieldGroup = new THREE.Group();
-        const shieldBaseGeo = new THREE.CylinderGeometry(0.18, 0.18, 0.04, 8);
-        const shieldBase = new THREE.Mesh(shieldBaseGeo, whiteMat);
-        shieldBase.rotation.x = Math.PI / 2;
-        shieldGroup.add(shieldBase);
-
-        const shieldRimGeo = new THREE.TorusGeometry(0.18, 0.025, 6, 12);
-        const shieldRim = new THREE.Mesh(shieldRimGeo, cyanGlowMat);
+        const shieldRimGeo = new THREE.CylinderGeometry(0.25, 0.25, 0.05, 8);
+        const shieldRim = new THREE.Mesh(shieldRimGeo, darkArmorMat);
+        shieldRim.rotation.y = Math.PI / 2;
         shieldGroup.add(shieldRim);
 
-        const shieldBossGeo = new THREE.SphereGeometry(0.05, 6, 6);
-        const shieldBoss = new THREE.Mesh(shieldBossGeo, cyanGlowMat);
-        shieldBoss.position.z = 0.03;
+        const shieldBossGeo = new THREE.SphereGeometry(0.1, 8, 8);
+        const shieldBoss = new THREE.Mesh(shieldBossGeo, goldTrimMat);
+        shieldBoss.position.set(-0.03, 0, 0);
         shieldGroup.add(shieldBoss);
 
-        shieldGroup.position.set(-0.08, -0.05, 0.08);
+        const shieldGlowGeo = new THREE.BoxGeometry(0.04, 0.28, 0.28);
+        const shieldGlow = new THREE.Mesh(shieldGlowGeo, glowingVisorMat);
+        shieldGroup.add(shieldGlow);
+
+        shieldGroup.position.set(-0.12, -0.18, 0.08);
         shieldGroup.rotation.y = Math.PI / 2;
-        leftArm.add(shieldGroup);
-        group.add(leftArm); // children[4]
+        leftArmGroup.add(shieldGroup);
 
-        // 6. Right Arm (child 5) & Glowing Cyber Energy Blade
-        const rightArm = new THREE.Mesh(armGeo, mat);
-        rightArm.position.set(0.25, 0.75, 0);
-        rightArm.rotation.z = -0.3;
+        this.heroModel.add(leftArmGroup);
 
-        const rightCuff = new THREE.Mesh(cuffGeo, whiteMat);
-        rightCuff.position.set(0, -0.09, 0);
-        rightArm.add(rightCuff);
+        // 6. Right Arm with Radiant Hero Blade
+        const rightArmGroup = new THREE.Group();
+        rightArmGroup.position.set(0.32, 1.12, 0);
 
-        // Cyber Energy Sword
-        const swordGroup = new THREE.Group();
-        
-        // Hilt grip
-        const swordHiltGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.12, 5);
-        const swordHilt = new THREE.Mesh(swordHiltGeo, darkArmorMat);
-        swordGroup.add(swordHilt);
+        const rightArm = new THREE.Mesh(armGeo, heroMat);
+        rightArm.position.y = -0.16;
+        rightArm.castShadow = true;
+        rightArmGroup.add(rightArm);
 
-        // Crossguard
-        const swordGuardGeo = new THREE.BoxGeometry(0.12, 0.025, 0.04);
-        const swordGuard = new THREE.Mesh(swordGuardGeo, whiteMat);
-        swordGuard.position.y = 0.06;
-        swordGroup.add(swordGuard);
+        // Weapon (Hero Broadsword / Energy Blade)
+        const weaponGroup = new THREE.Group();
+        const hiltGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.42, 6);
+        const hilt = new THREE.Mesh(hiltGeo, darkArmorMat);
+        hilt.rotation.x = Math.PI / 2;
+        weaponGroup.add(hilt);
 
-        // Glowing Energy Blade
-        const swordBladeGeo = new THREE.BoxGeometry(0.055, 0.42, 0.015);
-        const swordBlade = new THREE.Mesh(swordBladeGeo, cyanGlowMat);
-        swordBlade.position.y = 0.28;
-        swordGroup.add(swordBlade);
+        const crossguardGeo = new THREE.BoxGeometry(0.24, 0.05, 0.06);
+        const crossguard = new THREE.Mesh(crossguardGeo, goldTrimMat);
+        crossguard.position.set(0, 0, -0.12);
+        weaponGroup.add(crossguard);
 
-        swordGroup.position.set(0.04, -0.12, 0.12);
-        swordGroup.rotation.x = Math.PI / 3;
-        rightArm.add(swordGroup);
-        group.add(rightArm); // children[5]
+        // Silver metallic blade
+        const swordBladeGeo = new THREE.BoxGeometry(0.08, 0.68, 0.03);
+        const bladeMat = new THREE.MeshStandardMaterial({
+            color: 0xddf0ff,
+            metalness: 0.95,
+            roughness: 0.15
+        });
+        const swordBlade = new THREE.Mesh(swordBladeGeo, bladeMat);
+        swordBlade.position.set(0, 0, -0.48);
+        swordBlade.rotation.x = Math.PI / 2;
+        weaponGroup.add(swordBlade);
 
-        // Store part references
-        group.userData.body = body;
-        group.userData.head = head;
-        group.userData.leftLeg = leftLeg;
-        group.userData.rightLeg = rightLeg;
-        group.userData.leftArm = leftArm;
-        group.userData.rightArm = rightArm;
-        group.userData.sword = swordGroup;
-        group.userData.shield = shieldGroup;
-        group.userData.isEnemy = false;
-        group.userData.hitReact = 0;
+        // Radiant glowing cutting core
+        const bladeCoreGeo = new THREE.BoxGeometry(0.035, 0.65, 0.045);
+        const bladeCore = new THREE.Mesh(bladeCoreGeo, energyCoreMat);
+        bladeCore.position.set(0, 0, -0.48);
+        bladeCore.rotation.x = Math.PI / 2;
+        weaponGroup.add(bladeCore);
 
-        return group;
+        weaponGroup.position.set(0.06, -0.25, 0.12);
+        weaponGroup.rotation.x = 0.25;
+        rightArmGroup.add(weaponGroup);
+
+        this.heroModel.add(rightArmGroup);
+
+        // 7. Armored Legs & Runner Boots
+        const legGeo = new THREE.CapsuleGeometry(0.085, 0.36, 6, 6);
+        const bootGeo = new THREE.BoxGeometry(0.14, 0.12, 0.24);
+        const kneeGeo = new THREE.BoxGeometry(0.14, 0.1, 0.14);
+
+        // Left Leg Group
+        const leftLegGroup = new THREE.Group();
+        leftLegGroup.position.set(-0.14, 0.65, 0);
+
+        const leftLeg = new THREE.Mesh(legGeo, heroMat);
+        leftLeg.position.y = -0.18;
+        leftLeg.castShadow = true;
+        leftLegGroup.add(leftLeg);
+
+        const leftKnee = new THREE.Mesh(kneeGeo, goldTrimMat);
+        leftKnee.position.set(0, -0.14, 0.06);
+        leftLegGroup.add(leftKnee);
+
+        const leftBoot = new THREE.Mesh(bootGeo, darkArmorMat);
+        leftBoot.position.set(0, -0.38, 0.05);
+        leftBoot.castShadow = true;
+        leftLegGroup.add(leftBoot);
+
+        this.heroModel.add(leftLegGroup);
+
+        // Right Leg Group
+        const rightLegGroup = new THREE.Group();
+        rightLegGroup.position.set(0.14, 0.65, 0);
+
+        const rightLeg = new THREE.Mesh(legGeo, heroMat);
+        rightLeg.position.y = -0.18;
+        rightLeg.castShadow = true;
+        rightLegGroup.add(rightLeg);
+
+        const rightKnee = new THREE.Mesh(kneeGeo, goldTrimMat);
+        rightKnee.position.set(0, -0.14, 0.06);
+        rightLegGroup.add(rightKnee);
+
+        const rightBoot = new THREE.Mesh(bootGeo, darkArmorMat);
+        rightBoot.position.set(0, -0.38, 0.05);
+        rightBoot.castShadow = true;
+        rightLegGroup.add(rightBoot);
+
+        this.heroModel.add(rightLegGroup);
+
+        // 8. Flowing Runner Cape
+        const capeGeo = new THREE.BoxGeometry(0.32, 0.55, 0.02);
+        const capeMat = new THREE.MeshStandardMaterial({
+            color: skinColor,
+            roughness: 0.7,
+            metalness: 0.1
+        });
+        const cape = new THREE.Mesh(capeGeo, capeMat);
+        cape.position.set(0, 0.9, -0.14);
+        cape.rotation.x = 0.28;
+        this.heroModel.add(cape);
+
+        // Store parts for animation
+        this.heroParts = {
+            torso,
+            headGroup,
+            leftArmGroup,
+            rightArmGroup,
+            weaponGroup,
+            shieldGroup,
+            leftLegGroup,
+            rightLegGroup,
+            cape,
+            bladeCore,
+            core
+        };
+
+        // Apply hero level scaling
+        const heroLevel = this.game ? this.game.heroLevel : 1;
+        this.updateHeroScale(heroLevel);
+
+        this.scene.add(this.heroGroup);
+    }
+
+    updateHeroScale(level = 1) {
+        if (!this.heroModel) return;
+        // Subtle visual size & power increase at higher levels
+        const scale = 1.0 + Math.min(0.24, (level - 1) * 0.04);
+        this.heroModel.scale.set(scale, scale, scale);
+    }
+
+    getPlayerCount() {
+        return (this.game && this.game.heroHP > 0) ? 1 : 0;
+    }
+
+    updatePlayerPosition(x, z) {
+        if (this.heroGroup) {
+            this.heroGroup.position.set(x, 0, z);
+        }
+    }
+
+    // ============ ANIMATION & GAME LOOP ============
+    update(delta, isFighting = false, fightingEnemy = null, playerX = 0, trackZ = 0) {
+        this.animTime += delta * 11;
+
+        // Calculate horizontal swipe velocity for banking tilt
+        const deltaX = playerX - this.prevPlayerX;
+        this.horizontalVel = THREE.MathUtils.damp(this.horizontalVel, deltaX / Math.max(delta, 0.001), 12, delta);
+        this.prevPlayerX = playerX;
+
+        if (this.heroParts && this.heroModel) {
+            const parts = this.heroParts;
+
+            if (isFighting && fightingEnemy) {
+                // ============ COMBAT STANCE & ATTACK ============
+                this.combatTime += delta;
+
+                // Hero combat stance: solid braced forward stance
+                this.heroModel.position.y = 0.05 + Math.abs(Math.sin(this.combatTime * 14)) * 0.06;
+                this.heroModel.rotation.x = 0.12;
+                this.heroGroup.rotation.z = 0;
+
+                // Shield raised in guard
+                parts.leftArmGroup.rotation.x = -0.85 + Math.sin(this.combatTime * 10) * 0.15;
+                parts.leftArmGroup.rotation.y = 0.45;
+                parts.leftArmGroup.rotation.z = 0.3;
+
+                // Dynamic Sword Slashes
+                const slashCycle = Math.sin(this.combatTime * 22);
+                parts.rightArmGroup.rotation.x = -1.1 + slashCycle * 0.85;
+                parts.rightArmGroup.rotation.y = -0.3 + Math.cos(this.combatTime * 22) * 0.4;
+                parts.rightArmGroup.rotation.z = -0.2;
+
+                // Braced legs
+                parts.leftLegGroup.rotation.x = -0.35 + Math.sin(this.combatTime * 8) * 0.1;
+                parts.rightLegGroup.rotation.x = 0.4 - Math.sin(this.combatTime * 8) * 0.1;
+
+                // Cape billows in combat breeze
+                parts.cape.rotation.x = 0.35 + Math.sin(this.combatTime * 12) * 0.15;
+
+                // Periodic slash arc spawn
+                if (Math.random() < 0.25) {
+                    const slashPos = new THREE.Vector3(
+                        playerX + (Math.random() - 0.5) * 0.5,
+                        0.9 + Math.random() * 0.5,
+                        -trackZ - 0.7
+                    );
+                    this.spawnSlash(slashPos, null, 0x00f0ff, 1.2);
+                }
+
+            } else {
+                // ============ NORMAL RUNNING ANIMATION ============
+                this.combatTime = 0;
+                const walkCycle = this.animTime;
+
+                // Vertical runner bobbing
+                this.heroModel.position.y = Math.abs(Math.sin(walkCycle)) * 0.1;
+
+                // Dynamic sprint forward lean
+                this.heroModel.rotation.x = 0.16;
+
+                // Steering bank into left/right swipe
+                const bankAngle = THREE.MathUtils.clamp(-this.horizontalVel * 0.035, -0.22, 0.22);
+                this.heroGroup.rotation.z = THREE.MathUtils.damp(this.heroGroup.rotation.z, bankAngle, 10, delta);
+
+                // Alternating stride legs
+                parts.leftLegGroup.rotation.x = Math.sin(walkCycle) * 0.85;
+                parts.rightLegGroup.rotation.x = -Math.sin(walkCycle) * 0.85;
+
+                // Alternating running arm swings
+                parts.leftArmGroup.rotation.x = -Math.sin(walkCycle) * 0.55;
+                parts.leftArmGroup.rotation.y = 0;
+                parts.leftArmGroup.rotation.z = 0.2;
+
+                parts.rightArmGroup.rotation.x = Math.sin(walkCycle) * 0.65;
+                parts.rightArmGroup.rotation.y = 0;
+                parts.rightArmGroup.rotation.z = -0.22;
+
+                // Flowing cape flapping behind runner
+                parts.cape.rotation.x = 0.42 + Math.sin(walkCycle * 2) * 0.14;
+                parts.cape.rotation.z = Math.sin(walkCycle) * 0.08;
+
+                // Head look straight ahead
+                parts.headGroup.rotation.y = THREE.MathUtils.clamp(-this.horizontalVel * 0.02, -0.15, 0.15);
+            }
+        }
+
+        // Update all visual particle systems
+        this.updateSlashEffects(delta);
+        this.updateFlyingBodies(delta);
+        this.updateImpactFlashes(delta);
+        this.updateSparkParticles(delta);
+        this.updateTrailParticles(delta);
+    }
+
+    triggerLevelUpEffect() {
+        if (!this.heroGroup) return;
+        const pos = this.heroGroup.position.clone();
+        pos.y = 1.0;
+
+        // Radiant golden aura rings
+        this.spawnImpactFlash(pos, 0xffd700);
+        this.spawnSparks(pos, 0xffea00, 18);
+        this.spawnSlash(pos, null, 0xffd700, 1.8);
+
+        // Update scale with new level
+        if (this.game) {
+            this.updateHeroScale(this.game.heroLevel);
+        }
     }
 
     addToPlayerCrowd(amount) {
-        const startIndex = this.playerCount;
-        this.playerCount += amount;
-
-        for (let i = 0; i < amount; i++) {
-            this.addStickmanToGroup(startIndex + i);
+        // Converted to Hero XP progression
+        if (this.game) {
+            this.game.addHeroXP(amount * 15);
         }
     }
 
     removeFromPlayerCrowd(amount) {
-        amount = Math.min(amount, this.playerCount - 1);
-        if (amount <= 0) return;
-
-        for (let i = 0; i < amount; i++) {
-            if (this.playerStickmen.length > 1) {
-                const stickman = this.playerStickmen.pop();
-                // Instead of just removing, launch it as a ragdoll
-                let ragdollColor;
-                if (this.game && this.game.equippedSkin === 'rainbow') {
-                    const rainbowColors = [0xFF1744, 0xFF9100, 0xFFEA00, 0x00E676, 0x2979FF, 0xD500F9];
-                    ragdollColor = rainbowColors[Math.floor(Math.random() * rainbowColors.length)];
-                } else {
-                    ragdollColor = this.game ? this.game.getPlayerColor() : 0x2196F3;
-                }
-                this.launchRagdoll(stickman, ragdollColor);
-                if (this.playerGroup) {
-                    this.playerGroup.remove(stickman);
-                }
-            }
+        // Converted to Hero damage
+        if (this.game) {
+            this.game.damageHero(amount * 8);
         }
-        this.playerCount = Math.max(1, this.playerCount - amount);
     }
 
     removeEnemyCrowd(enemy) {
@@ -469,7 +526,7 @@ export class CrowdManager {
             // Launch remaining enemy stickmen as ragdolls
             const children = [...enemy.meshGroup.children];
             children.forEach(child => {
-                this.launchRagdoll(child, 0xf44336, enemy.meshGroup);
+                this.launchRagdoll(child, 0xf44336);
             });
             setTimeout(() => {
                 if (enemy.meshGroup) {
@@ -483,57 +540,54 @@ export class CrowdManager {
         }
     }
 
-    // ============ RAGDOLL FLYING STICKMAN ============
-    launchRagdoll(stickman, color, parentGroup) {
-        // Get world position of the stickman
+    // ============ RAGDOLL FLYING ENEMY ============
+    launchRagdoll(stickman, color) {
         const worldPos = new THREE.Vector3();
         stickman.getWorldPosition(worldPos);
 
-        // Check if enemy or friendly
-        const isEnemy = stickman.userData && stickman.userData.isEnemy === true;
-        const ragdoll = this.createStickman(color, isEnemy);
-        ragdoll.position.copy(worldPos);
-        ragdoll.userData.dynamic = true;
+        const group = new THREE.Group();
+        const mat = new THREE.MeshStandardMaterial({
+            color: color || 0x880e4f,
+            roughness: 0.5,
+            metalness: 0.6
+        });
 
-        // Random launch direction (mostly up and outward)
+        // Simple ragdoll stickman mesh
+        const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.45, 4, 4), mat);
+        body.position.y = 0.65;
+        group.add(body);
+
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8), mat);
+        head.position.y = 1.15;
+        group.add(head);
+
+        group.position.copy(worldPos);
+        group.userData.dynamic = true;
+
         const launchAngle = Math.random() * Math.PI * 2;
-        const launchPower = 4 + Math.random() * 6;
+        const launchPower = 5 + Math.random() * 6;
         const upPower = 6 + Math.random() * 5;
 
-        ragdoll.userData.velocity = new THREE.Vector3(
+        group.userData.velocity = new THREE.Vector3(
             Math.cos(launchAngle) * launchPower,
             upPower,
             Math.sin(launchAngle) * launchPower
         );
-        ragdoll.userData.angularVel = new THREE.Vector3(
-            (Math.random() - 0.5) * 15,
-            (Math.random() - 0.5) * 10,
-            (Math.random() - 0.5) * 15
+        group.userData.angularVel = new THREE.Vector3(
+            (Math.random() - 0.5) * 16,
+            (Math.random() - 0.5) * 12,
+            (Math.random() - 0.5) * 16
         );
-        ragdoll.userData.life = 1.5;
-        ragdoll.userData.maxLife = 1.5;
-        ragdoll.userData.color = color;
-        ragdoll.userData.trailTimer = 0;
+        group.userData.life = 1.4;
+        group.userData.maxLife = 1.4;
 
-        // Make material transparent for fade-out
-        ragdoll.traverse(child => {
-            if (child.material) {
-                child.material = child.material.clone();
-                child.material.transparent = true;
-            }
-        });
+        this.scene.add(group);
+        this.flyingBodies.push({ mesh: group });
 
-        this.scene.add(ragdoll);
-        this.flyingBodies.push({ mesh: ragdoll });
-
-        // Spawn impact flash at launch position
         this.spawnImpactFlash(worldPos, color);
-
-        // Spawn burst sparks
-        this.spawnSparks(worldPos, color, 5);
+        this.spawnSparks(worldPos, color, 6);
     }
 
-    // ============ NEON SWORD SLASH EFFECT ============
     spawnSlash(position, rotation, color = 0x00f0ff, scale = 1) {
         if (this.slashEffects.length >= 6) {
             const oldest = this.slashEffects.shift();
@@ -542,7 +596,7 @@ export class CrowdManager {
             if (oldest.mesh.material) oldest.mesh.material.dispose();
         }
 
-        const arcGeo = new THREE.RingGeometry(0.24 * scale, 0.46 * scale, 12, 1, 0, Math.PI * 0.7);
+        const arcGeo = new THREE.RingGeometry(0.25 * scale, 0.5 * scale, 12, 1, 0, Math.PI * 0.7);
         const arcMat = new THREE.MeshBasicMaterial({
             color: color,
             transparent: true,
@@ -564,8 +618,8 @@ export class CrowdManager {
         this.scene.add(slash);
         this.slashEffects.push({
             mesh: slash,
-            life: 0.13,
-            maxLife: 0.13
+            life: 0.14,
+            maxLife: 0.14
         });
     }
 
@@ -588,262 +642,129 @@ export class CrowdManager {
         }
     }
 
-    // ============ IMPACT FLASH (expanding ring) ============
-    spawnImpactFlash(position, color) {
-        const ringGeo = new THREE.RingGeometry(0.1, 0.3, 16);
+    spawnImpactFlash(position, color = 0xffffff) {
+        if (this.impactFlashes.length >= 6) {
+            const oldest = this.impactFlashes.shift();
+            this.scene.remove(oldest.mesh);
+            if (oldest.mesh.geometry) oldest.mesh.geometry.dispose();
+            if (oldest.mesh.material) oldest.mesh.material.dispose();
+        }
+
+        const ringGeo = new THREE.RingGeometry(0.1, 0.45, 16);
         const ringMat = new THREE.MeshBasicMaterial({
             color: color,
             transparent: true,
-            opacity: 1,
-            side: THREE.DoubleSide
+            opacity: 1.0,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending
         });
-        const ring = new THREE.Mesh(ringGeo, ringMat);
-        ring.position.copy(position);
-        ring.position.y += 0.8;
-        ring.rotation.x = -Math.PI / 2;
-        ring.userData.dynamic = true;
-
-        this.scene.add(ring);
-        this.impactFlashes.push({
-            mesh: ring,
-            life: 0.4,
-            maxLife: 0.4
-        });
-
-        // Also spawn a bright sphere flash
-        const flashGeo = new THREE.SphereGeometry(0.3, 8, 8);
-        const flashMat = new THREE.MeshBasicMaterial({
-            color: 0xFFFFFF,
-            transparent: true,
-            opacity: 0.9
-        });
-        const flash = new THREE.Mesh(flashGeo, flashMat);
+        const flash = new THREE.Mesh(ringGeo, ringMat);
         flash.position.copy(position);
-        flash.position.y += 0.8;
+        flash.position.y += 0.05;
+        flash.rotation.x = -Math.PI / 2;
         flash.userData.dynamic = true;
         this.scene.add(flash);
         this.impactFlashes.push({
             mesh: flash,
-            life: 0.2,
-            maxLife: 0.2
+            life: 0.16,
+            maxLife: 0.16
         });
     }
 
-    // ============ SPARK PARTICLES ============
-    spawnSparks(position, color, count) {
+    updateImpactFlashes(delta) {
+        for (let i = this.impactFlashes.length - 1; i >= 0; i--) {
+            const flash = this.impactFlashes[i];
+            flash.life -= delta;
+            const progress = 1 - (flash.life / flash.maxLife);
+            
+            const s = 1 + progress * 2.2;
+            flash.mesh.scale.set(s, s, s);
+            flash.mesh.material.opacity = Math.max(0, 1 - progress);
+
+            if (flash.life <= 0) {
+                this.scene.remove(flash.mesh);
+                flash.mesh.geometry.dispose();
+                flash.mesh.material.dispose();
+                this.impactFlashes.splice(i, 1);
+            }
+        }
+    }
+
+    spawnSparks(position, color = 0xffaa00, count = 6) {
         for (let i = 0; i < count; i++) {
-            const geo = new THREE.SphereGeometry(0.06 + Math.random() * 0.06, 4, 4);
-            const mat = new THREE.MeshBasicMaterial({
-                color: Math.random() > 0.5 ? color : 0xFFFFFF,
+            if (this.sparkParticles.length >= 35) {
+                const oldest = this.sparkParticles.shift();
+                this.scene.remove(oldest.mesh);
+                if (oldest.mesh.geometry) oldest.mesh.geometry.dispose();
+                if (oldest.mesh.material) oldest.mesh.material.dispose();
+            }
+
+            const sparkGeo = new THREE.BoxGeometry(0.06, 0.06, 0.06);
+            const sparkMat = new THREE.MeshBasicMaterial({
+                color: color,
                 transparent: true,
-                opacity: 1
+                opacity: 1.0,
+                blending: THREE.AdditiveBlending
             });
-            const spark = new THREE.Mesh(geo, mat);
+            const spark = new THREE.Mesh(sparkGeo, sparkMat);
             spark.position.copy(position);
-            spark.position.y += 0.5 + Math.random() * 0.5;
             spark.userData.dynamic = true;
 
             const angle = Math.random() * Math.PI * 2;
-            const speed = 3 + Math.random() * 5;
-            spark.userData.velocity = new THREE.Vector3(
-                Math.cos(angle) * speed,
-                2 + Math.random() * 4,
-                Math.sin(angle) * speed
-            );
-            spark.userData.life = 0.5 + Math.random() * 0.3;
-            spark.userData.maxLife = spark.userData.life;
+            const speed = 2.5 + Math.random() * 4.5;
+            const upSpeed = 2 + Math.random() * 4;
 
             this.scene.add(spark);
-            this.sparkParticles.push({ mesh: spark });
-        }
-    }
-
-    // ============ DEATH EFFECT (called from game.js fight) ============
-    spawnDeathEffect(x, z, color) {
-        const pos = new THREE.Vector3(
-            x + (Math.random() - 0.5) * 2,
-            0.5,
-            z + (Math.random() - 0.5) * 1
-        );
-        this.spawnImpactFlash(pos, color);
-        this.spawnSparks(pos, color, 4);
-    }
-
-    getPlayerCount() {
-        return this.playerCount;
-    }
-
-    updatePlayerPosition(x, z) {
-        if (this.playerGroup) {
-            this.playerGroup.position.set(x, 0, z);
-        }
-    }
-
-    update(delta, isFighting = false, fightingEnemy = null, playerX = 0, trackZ = 0) {
-        this.animTime += delta * 5; // Slower animation cycle
-        if (isFighting) {
-            this.combatTime += delta;
-        } else {
-            this.combatTime = 0;
-        }
-        
-        // Animate stickmen
-        if (this.playerStickmen.length > 0) {
-            const frontlineCount = Math.min(10, Math.max(3, Math.floor(this.playerStickmen.length * 0.45)));
-
-            this.playerStickmen.forEach((stickman, i) => {
-                // Spawn pop-in animation
-                if (stickman.userData.spawning) {
-                    const elapsed = this.animTime - stickman.userData.spawnTime;
-                    const t = Math.min(elapsed * 2, 1);
-                    const scale = Math.min(t * 1.2, 1) * (1 + Math.sin(t * Math.PI) * 0.3);
-                    stickman.scale.set(
-                        Math.min(scale, 1),
-                        Math.min(scale, 1),
-                        Math.min(scale, 1)
-                    );
-                    if (t >= 1) {
-                        stickman.userData.spawning = false;
-                        stickman.scale.set(1, 1, 1);
-                    }
-                }
-
-                const children = stickman.children;
-                const baseZ = stickman.userData.basePos ? stickman.userData.basePos.z : 0;
-                const baseX = stickman.userData.basePos ? stickman.userData.basePos.x : 0;
-
-                if (isFighting && fightingEnemy) {
-                    // ============ COMBAT ENGAGEMENT ANIMATION ============
-                    const isFrontline = i < frontlineCount;
-
-                    if (isFrontline) {
-                        // Frontline fighters push forward towards the clash zone
-                        const targetZ = baseZ - 1.1;
-                        stickman.position.z += (targetZ - stickman.position.z) * Math.min(1, delta * 8);
-
-                        // Athletic fighting stance shuffle
-                        stickman.position.y = 0.05 + Math.sin(this.combatTime * 14 + i) * 0.04;
-
-                        // Braced legs
-                        if (children.length >= 4) {
-                            children[2].rotation.x = -0.35 + Math.sin(this.combatTime * 8 + i) * 0.15;
-                            children[3].rotation.x = 0.35 - Math.sin(this.combatTime * 8 + i) * 0.15;
-                        }
-
-                        // Guard stance: Left arm with shield raised to block
-                        if (children.length >= 5) {
-                            children[4].rotation.x = -0.75 + Math.sin(this.combatTime * 8 + i) * 0.15;
-                            children[4].rotation.y = 0.35;
-                            children[4].rotation.z = 0.4;
-                        }
-
-                        // Fast, snappy sword slash attacks
-                        const attackSpeed = 13;
-                        const attackPhase = (this.combatTime * attackSpeed + i * 1.6) % (Math.PI * 2);
-                        if (children.length >= 6) {
-                            children[5].rotation.x = Math.sin(attackPhase) * 1.2 - 0.2;
-                            children[5].rotation.y = -Math.cos(attackPhase) * 0.35;
-                            children[5].rotation.z = -0.25;
-                        }
-
-                        // Lunge forward into slash
-                        if (children.length >= 1) {
-                            children[0].rotation.x = 0.22 + Math.sin(attackPhase) * 0.12;
-                            children[0].rotation.y = Math.sin(attackPhase) * 0.15;
-                        }
-                        if (children.length >= 2) {
-                            children[1].rotation.x = 0.1 + Math.sin(attackPhase) * 0.08;
-                        }
-
-                        // Spawn neon slash arc and light sparks near apex of sword swing
-                        if (attackPhase > 1.7 && attackPhase < 2.1 && Math.random() < 0.25) {
-                            const worldPos = new THREE.Vector3();
-                            stickman.getWorldPosition(worldPos);
-                            worldPos.y += 0.8;
-                            worldPos.z -= 0.35;
-                            worldPos.x += (Math.random() - 0.5) * 0.3;
-                            this.spawnSlash(worldPos, null, 0x00f0ff, 1.0);
-                            if (Math.random() < 0.35) {
-                                this.spawnSparks(worldPos, 0x00f0ff, 2);
-                            }
-                        }
-                    } else {
-                        // Reserve / rear fighters cheer and press forward
-                        const targetZ = baseZ - 0.5;
-                        stickman.position.z += (targetZ - stickman.position.z) * Math.min(1, delta * 6);
-                        stickman.position.y = Math.abs(Math.sin(this.combatTime * 9 + i * 0.5)) * 0.18;
-
-                        // Raised arms cheering / rallying
-                        if (children.length >= 5) {
-                            children[4].rotation.x = -1.1 + Math.cos(this.combatTime * 10 + i) * 0.3;
-                            children[4].rotation.z = 0.5;
-                        }
-                        if (children.length >= 6) {
-                            children[5].rotation.x = -1.3 + Math.sin(this.combatTime * 11 + i) * 0.4;
-                            children[5].rotation.z = -0.4;
-                        }
-                        if (children.length >= 1) {
-                            children[0].rotation.x = 0.08;
-                            children[0].rotation.y = 0;
-                        }
-                    }
-
-                    // Hit reaction flinch
-                    if (stickman.userData.hitReact > 0) {
-                        stickman.userData.hitReact = Math.max(0, stickman.userData.hitReact - delta * 4);
-                        if (children.length >= 1) {
-                            children[0].rotation.x -= 0.35 * stickman.userData.hitReact;
-                        }
-                        stickman.position.z += 0.12 * stickman.userData.hitReact;
-                    }
-                } else {
-                    // ============ NORMAL RUNNING ANIMATION ============
-                    // Smoothly restore base position
-                    stickman.position.z += (baseZ - stickman.position.z) * Math.min(1, delta * 6);
-                    stickman.position.x += (baseX - stickman.position.x) * Math.min(1, delta * 6);
-
-                    const offset = i * 0.7;
-                    const walkCycle = this.animTime + offset;
-                    
-                    // Bobbing motion - more pronounced up/down
-                    if (!stickman.userData.spawning) {
-                        stickman.position.y = Math.abs(Math.sin(walkCycle * 2)) * 0.25;
-                    }
-                    
-                    // Body lean forward while running
-                    if (children.length >= 1) {
-                        children[0].rotation.x = 0.15 + Math.sin(walkCycle) * 0.05;
-                        children[0].rotation.y = 0;
-                    }
-                    // Head bob
-                    if (children.length >= 2) {
-                        children[1].rotation.x = Math.sin(walkCycle * 2) * 0.08;
-                    }
-                    
-                    // Leg animation - runner stride
-                    if (children.length >= 4) {
-                        children[2].rotation.x = Math.sin(walkCycle) * 0.8;
-                        children[3].rotation.x = -Math.sin(walkCycle) * 0.8;
-                    }
-                    // Arm animation - running swing with weapons in hand
-                    if (children.length >= 6) {
-                        children[4].rotation.x = -Math.sin(walkCycle) * 0.7;
-                        children[4].rotation.y = 0;
-                        children[4].rotation.z = 0.3 + Math.sin(walkCycle * 2) * 0.1;
-                        children[5].rotation.x = Math.sin(walkCycle) * 0.7;
-                        children[5].rotation.y = 0;
-                        children[5].rotation.z = -0.3 - Math.sin(walkCycle * 2) * 0.1;
-                    }
-                }
+            this.sparkParticles.push({
+                mesh: spark,
+                velocity: new THREE.Vector3(
+                    Math.cos(angle) * speed,
+                    upSpeed,
+                    Math.sin(angle) * speed
+                ),
+                life: 0.35 + Math.random() * 0.25,
+                maxLife: 0.6
             });
         }
+    }
 
-        // Update all effects
-        this.updateSlashEffects(delta);
-        this.updateFlyingBodies(delta);
-        this.updateImpactFlashes(delta);
-        this.updateSparkParticles(delta);
-        this.updateTrailParticles(delta);
+    updateSparkParticles(delta) {
+        for (let i = this.sparkParticles.length - 1; i >= 0; i--) {
+            const p = this.sparkParticles[i];
+            p.life -= delta;
+            p.velocity.y -= 14 * delta; // Gravity
+            p.mesh.position.addScaledVector(p.velocity, delta);
+
+            const progress = 1 - (p.life / p.maxLife);
+            p.mesh.material.opacity = Math.max(0, 1 - progress);
+
+            if (p.life <= 0 || p.mesh.position.y < 0) {
+                this.scene.remove(p.mesh);
+                p.mesh.geometry.dispose();
+                p.mesh.material.dispose();
+                this.sparkParticles.splice(i, 1);
+            }
+        }
+    }
+
+    updateTrailParticles(delta) {
+        for (let i = this.trailParticles.length - 1; i >= 0; i--) {
+            const p = this.trailParticles[i];
+            p.life -= delta;
+            p.mesh.position.addScaledVector(p.velocity, delta);
+            const progress = 1 - (p.life / p.maxLife);
+            p.mesh.material.opacity = Math.max(0, 1 - progress);
+            const s = (1 - progress) * 0.08;
+            p.mesh.scale.set(s, s, s);
+
+            if (p.life <= 0) {
+                this.scene.remove(p.mesh);
+                p.mesh.geometry.dispose();
+                p.mesh.material.dispose();
+                this.trailParticles.splice(i, 1);
+            }
+        }
     }
 
     updateFlyingBodies(delta) {
@@ -855,152 +776,46 @@ export class CrowdManager {
             ud.life -= delta;
             const lifeRatio = ud.life / ud.maxLife;
 
-            // Physics
-            ud.velocity.y -= 20 * delta; // gravity
-            mesh.position.x += ud.velocity.x * delta;
-            mesh.position.y += ud.velocity.y * delta;
-            mesh.position.z += ud.velocity.z * delta;
+            ud.velocity.y -= 18 * delta; // Gravity
+            mesh.position.addScaledVector(ud.velocity, delta);
 
-            // Tumbling rotation
             mesh.rotation.x += ud.angularVel.x * delta;
             mesh.rotation.y += ud.angularVel.y * delta;
             mesh.rotation.z += ud.angularVel.z * delta;
 
-            // Slow down angular velocity
-            ud.angularVel.multiplyScalar(0.98);
-
-            // Fade out and shrink in last 30% of life
-            if (lifeRatio < 0.3) {
-                const fadeRatio = lifeRatio / 0.3;
-                mesh.traverse(child => {
-                    if (child.material) {
-                        child.material.opacity = fadeRatio;
-                    }
-                });
-                mesh.scale.setScalar(fadeRatio);
-            }
-
-            // Spawn trail particles
-            ud.trailTimer += delta;
-            if (ud.trailTimer > 0.05 && lifeRatio > 0.3) {
-                ud.trailTimer = 0;
-                this.spawnTrailParticle(mesh.position, ud.color);
-            }
-
-            // Bounce off ground
-            if (mesh.position.y < 0.2 && ud.velocity.y < 0) {
-                ud.velocity.y *= -0.4;
-                ud.velocity.x *= 0.7;
-                ud.velocity.z *= 0.7;
+            if (mesh.position.y <= 0.2) {
                 mesh.position.y = 0.2;
-                // Spawn ground hit sparks
-                if (Math.abs(ud.velocity.y) > 1) {
-                    this.spawnSparks(mesh.position, ud.color, 2);
-                }
+                ud.velocity.y = -ud.velocity.y * 0.4;
+                ud.velocity.x *= 0.65;
+                ud.velocity.z *= 0.65;
+                ud.angularVel.multiplyScalar(0.5);
             }
 
-            // Remove when dead
+            mesh.traverse(child => {
+                if (child.material) {
+                    child.material.opacity = Math.max(0, lifeRatio);
+                }
+            });
+
             if (ud.life <= 0) {
                 this.scene.remove(mesh);
-                mesh.traverse(child => {
-                    if (child.geometry) child.geometry.dispose();
-                    if (child.material) child.material.dispose();
+                mesh.traverse(c => {
+                    if (c.geometry) c.geometry.dispose();
+                    if (c.material) c.material.dispose();
                 });
                 this.flyingBodies.splice(i, 1);
             }
         }
     }
 
-    updateImpactFlashes(delta) {
-        for (let i = this.impactFlashes.length - 1; i >= 0; i--) {
-            const flash = this.impactFlashes[i];
-            flash.life -= delta;
-            const ratio = flash.life / flash.maxLife;
-
-            // Expand and fade
-            const scale = 1 + (1 - ratio) * 4;
-            flash.mesh.scale.set(scale, scale, scale);
-            flash.mesh.material.opacity = ratio * 0.8;
-
-            if (flash.life <= 0) {
-                this.scene.remove(flash.mesh);
-                flash.mesh.geometry.dispose();
-                flash.mesh.material.dispose();
-                this.impactFlashes.splice(i, 1);
-            }
-        }
-    }
-
-    updateSparkParticles(delta) {
-        for (let i = this.sparkParticles.length - 1; i >= 0; i--) {
-            const spark = this.sparkParticles[i];
-            const mesh = spark.mesh;
-            const ud = mesh.userData;
-
-            ud.life -= delta;
-            const ratio = ud.life / ud.maxLife;
-
-            // Physics
-            ud.velocity.y -= 12 * delta;
-            mesh.position.x += ud.velocity.x * delta;
-            mesh.position.y += ud.velocity.y * delta;
-            mesh.position.z += ud.velocity.z * delta;
-
-            // Fade and shrink
-            mesh.material.opacity = ratio;
-            mesh.scale.setScalar(ratio);
-
-            // Slow down
-            ud.velocity.multiplyScalar(0.96);
-
-            if (ud.life <= 0 || mesh.position.y < -1) {
-                this.scene.remove(mesh);
-                mesh.geometry.dispose();
-                mesh.material.dispose();
-                this.sparkParticles.splice(i, 1);
-            }
-        }
-    }
-
-    spawnTrailParticle(position, color) {
-        const geo = new THREE.SphereGeometry(0.04, 4, 4);
-        const mat = new THREE.MeshBasicMaterial({
-            color: color,
-            transparent: true,
-            opacity: 0.6
-        });
-        const particle = new THREE.Mesh(geo, mat);
-        particle.position.copy(position);
-        particle.position.x += (Math.random() - 0.5) * 0.2;
-        particle.position.y += (Math.random() - 0.5) * 0.2;
-        particle.userData.dynamic = true;
-        particle.userData.life = 0.4;
-        particle.userData.maxLife = 0.4;
-        this.scene.add(particle);
-        this.trailParticles.push({ mesh: particle });
-    }
-
-    updateTrailParticles(delta) {
-        for (let i = this.trailParticles.length - 1; i >= 0; i--) {
-            const trail = this.trailParticles[i];
-            const mesh = trail.mesh;
-            mesh.userData.life -= delta;
-            const ratio = mesh.userData.life / mesh.userData.maxLife;
-
-            mesh.material.opacity = ratio * 0.6;
-            mesh.scale.setScalar(ratio);
-
-            if (mesh.userData.life <= 0) {
-                this.scene.remove(mesh);
-                mesh.geometry.dispose();
-                mesh.material.dispose();
-                this.trailParticles.splice(i, 1);
-            }
-        }
-    }
-
-    // Keep backward compat
     updateParticles(delta) {
-        // Now handled in update() automatically
+        this.updateSparkParticles(delta);
+        this.updateSlashEffects(delta);
+    }
+
+    spawnDeathEffect(x, z, color = 0x2196F3) {
+        const pos = new THREE.Vector3(x, 0.8, z);
+        this.spawnImpactFlash(pos, color);
+        this.spawnSparks(pos, color, 5);
     }
 }

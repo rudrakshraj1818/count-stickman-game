@@ -15,9 +15,16 @@ export class Game {
         this.state = 'menu'; // menu, playing, fighting, win, lose
         this.level = 1;
         this.coins = 0;
-        this.crowdUpgrade = 1;
-        this.strengthUpgrade = 1;
-        
+
+        // Hero Progression
+        this.heroLevel = 1;
+        this.heroXP = 0;
+        this.heroMaxXP = 100;
+        this.healthUpgrade = 1;   // Vitality (HP & Armor)
+        this.crowdUpgrade = 1;    // Alias for compatibility
+        this.strengthUpgrade = 1; // Weapon attack power
+        this.calculateHeroStats();
+
         // Skins & Themes
         this.skins = [
             { id: 'blue', name: 'Classic Blue', color: 0x2196F3, price: 0, owned: true },
@@ -46,10 +53,10 @@ export class Game {
         // Fighting state
         this.fightingEnemy = null;
         this.fightTimer = 0;
-        this.fightInterval = 0.12; // Time between each stickman removal
+        this.fightCameraTime = 0;
+        this.fightTickCount = 0;
         
-        // Player
-        this.playerCrowd = null;
+        // Player position & speed
         this.playerX = 0;
         this.speed = 9;
         this.trackZ = 0;
@@ -59,12 +66,21 @@ export class Game {
         this.trackLength = 200;
         
         // Input
-        this.inputX = 0;
         this.isDragging = false;
         this.lastInputX = 0;
+        this.keys = {};
         
         // Load saved data
         this.loadProgress();
+    }
+
+    calculateHeroStats() {
+        const vitality = this.healthUpgrade || this.crowdUpgrade || 1;
+        this.heroMaxHP = 100 + (vitality - 1) * 25 + (this.heroLevel - 1) * 15;
+        this.heroHP = this.heroMaxHP;
+        this.heroMaxArmor = 20 + (vitality - 1) * 15 + (this.heroLevel - 1) * 5;
+        this.heroArmor = this.heroMaxArmor;
+        this.heroAttack = 15 + (this.strengthUpgrade - 1) * 6 + (this.heroLevel - 1) * 3;
     }
 
     init() {
@@ -99,15 +115,14 @@ export class Game {
 
     setupScene() {
         this.scene = new THREE.Scene();
-        
-        // Apply active theme (gradient sky + fog)
         this.applyTheme();
     }
 
     setupCamera() {
+        // True Third-Person Camera behind the single hero
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 300);
-        this.camera.position.set(0, 12, 15);
-        this.camera.lookAt(0, 0, -10);
+        this.camera.position.set(0, 3.2, 5.8);
+        this.camera.lookAt(0, 1.35, -14);
     }
 
     setupLights() {
@@ -134,7 +149,6 @@ export class Game {
         const sun = new THREE.Mesh(sunGeo, sunMat);
         this.sunGroup.add(sun);
 
-        // Sun corona glow ring
         const coronaGeo = new THREE.RingGeometry(4.5, 7.5, 32);
         const coronaMat = new THREE.MeshBasicMaterial({ 
             color: 0xFFF9C4, 
@@ -149,7 +163,6 @@ export class Game {
         this.sunGroup.position.set(35, 45, -120);
         this.scene.add(this.sunGroup);
 
-        // Hemisphere light for vibrant outdoor arcade bounce (sky vs ground)
         const theme = this.getActiveTheme();
         const hemi = new THREE.HemisphereLight(theme.fog || 0x7dd3fc, theme.ground || 0x3d9959, 0.55);
         this.scene.add(hemi);
@@ -179,18 +192,16 @@ export class Game {
             if (this.state !== 'playing') return;
             this.isDragging = true;
             this.lastInputX = e.touches[0].clientX;
-        }, { passive: true });
+        });
         canvas.addEventListener('touchmove', (e) => {
             if (!this.isDragging || this.state !== 'playing') return;
-            e.preventDefault();
             const deltaX = (e.touches[0].clientX - this.lastInputX) * 0.02;
             this.playerX = Math.max(-3.5, Math.min(3.5, this.playerX + deltaX));
             this.lastInputX = e.touches[0].clientX;
-        }, { passive: false });
+        });
         canvas.addEventListener('touchend', () => { this.isDragging = false; });
 
         // Keyboard
-        this.keys = {};
         window.addEventListener('keydown', (e) => { this.keys[e.key] = true; });
         window.addEventListener('keyup', (e) => { this.keys[e.key] = false; });
     }
@@ -201,11 +212,14 @@ export class Game {
         this.playerX = 0;
         this.speed = 9;
         
-        // Init and start audio
+        // Audio
         this.audio.init();
         this.audio.resume();
         this.audio.startMusic();
         
+        // Reset hero stats for the run
+        this.calculateHeroStats();
+
         // Clear scene objects
         this.clearLevel();
         
@@ -213,20 +227,14 @@ export class Game {
         this.trackLength = 150 + this.level * 30;
         this.levelGenerator.generate(this.level, this.trackLength);
         
-        // Create player crowd
-        const startCount = this.getStartingCrowdSize();
-        this.crowdManager.createPlayerCrowd(startCount);
+        // Create single player hero
+        this.crowdManager.createPlayerCrowd();
         
         this.ui.showHUD();
-        this.ui.updateCount(startCount);
-    }
-
-    getStartingCrowdSize() {
-        return 1 + (this.crowdUpgrade - 1) * 3;
+        this.ui.updateHUDInfo();
     }
 
     clearLevel() {
-        // Remove all dynamic objects
         const toRemove = [];
         this.scene.traverse((obj) => {
             if (obj.userData.dynamic) {
@@ -259,22 +267,22 @@ export class Game {
             this.updateFight(delta);
             this.crowdManager.update(delta, true, this.fightingEnemy, this.playerX, this.trackZ);
             this.levelGenerator.updateEnemies(delta, true, this.fightingEnemy, this.playerX, this.trackZ, this.crowdManager);
-            this.ui.updateCount(this.crowdManager.getPlayerCount());
+            this.ui.updateHUDInfo();
             
-            // Camera shake and zoom during fight
+            // Third-Person Camera during fight
             this.fightCameraTime = (this.fightCameraTime || 0) + delta;
-            const shakeX = Math.sin(this.fightCameraTime * 25) * 0.15;
-            const shakeY = Math.cos(this.fightCameraTime * 30) * 0.08;
-            this.camera.position.x = this.playerX * 0.3 + shakeX;
-            this.camera.position.z = -this.trackZ + 12; // Zoom in closer
-            this.camera.position.y = 10 + shakeY;
-            this.camera.lookAt(this.playerX * 0.3, 1, -this.trackZ - 5);
+            const shakeX = Math.sin(this.fightCameraTime * 25) * 0.08;
+            const shakeY = Math.cos(this.fightCameraTime * 30) * 0.05;
+            this.camera.position.x = this.playerX * 0.5 + shakeX;
+            this.camera.position.z = -this.trackZ + 4.8;
+            this.camera.position.y = 2.6 + shakeY;
+            this.camera.lookAt(this.playerX * 0.2, 1.25, -this.trackZ - 6);
             return;
         }
 
         if (this.state !== 'playing') return;
 
-        // Keyboard input
+        // Keyboard steering
         if (this.keys['ArrowLeft'] || this.keys['a']) {
             this.playerX = Math.max(-3.5, this.playerX - 8 * delta);
         }
@@ -282,18 +290,27 @@ export class Game {
             this.playerX = Math.min(3.5, this.playerX + 8 * delta);
         }
 
-        // Move forward
+        // Move forward continuously
         this.trackZ += this.speed * delta;
 
-        // Update crowd position
+        // Update single hero position
         this.crowdManager.updatePlayerPosition(this.playerX, -this.trackZ);
 
-        // Update camera
-        this.camera.position.x = this.playerX * 0.3;
-        this.camera.position.z = -this.trackZ + 15;
-        this.camera.lookAt(this.playerX * 0.3, 0, -this.trackZ - 10);
+        // Third-Person Camera follow behind hero
+        const targetCamX = this.playerX * 0.7;
+        const targetCamY = 3.2;
+        const targetCamZ = -this.trackZ + 5.8;
 
-        // Update light position to follow player
+        this.camera.position.x += (targetCamX - this.camera.position.x) * Math.min(1, delta * 12);
+        this.camera.position.y += (targetCamY - this.camera.position.y) * Math.min(1, delta * 8);
+        this.camera.position.z = targetCamZ;
+
+        const lookTargetX = this.playerX * 0.35;
+        const lookTargetY = 1.35;
+        const lookTargetZ = -this.trackZ - 14;
+        this.camera.lookAt(lookTargetX, lookTargetY, lookTargetZ);
+
+        // Update light position to follow hero
         this.directionalLight.position.set(
             this.playerX + 10,
             20,
@@ -302,18 +319,14 @@ export class Game {
         this.directionalLight.target.position.set(this.playerX, 0, -this.trackZ);
         this.directionalLight.target.updateMatrixWorld();
 
-        // Keep sun visible in the sky ahead of the player
+        // Keep sun visible in the sky ahead
         if (this.sunGroup) {
             this.sunGroup.position.set(35, 45, -this.trackZ - 120);
         }
 
-        // Check gate collisions
+        // Check collisions
         this.checkGateCollisions();
-
-        // Check obstacle collisions
         this.checkObstacleCollisions();
-
-        // Check enemy collisions
         this.checkEnemyCollisions();
 
         // Check if reached end (boss)
@@ -321,12 +334,12 @@ export class Game {
             this.checkBossFight();
         }
 
-        // Update crowd and enemy animations
+        // Update hero running animation
         this.crowdManager.update(delta, false, null, this.playerX, this.trackZ);
         this.levelGenerator.updateEnemies(delta, false, null, this.playerX, this.trackZ, this.crowdManager);
 
-        // Update UI
-        this.ui.updateCount(this.crowdManager.getPlayerCount());
+        // Update HUD
+        this.ui.updateHUDInfo();
     }
 
     checkGateCollisions() {
@@ -338,9 +351,8 @@ export class Game {
             const gateZ = -gate.z;
             const playerZ = -this.trackZ;
 
-            // When player's crowd touches or crosses any gate, immediately apply and remove/hide it
+            // When hero touches or crosses any gate, apply effect and immediately remove gate
             if (Math.abs(playerZ - gateZ) < 1.0 || this.trackZ >= gate.z) {
-                // Check if player is on left or right gate
                 if (this.playerX < 0 && gate.leftGate) {
                     this.applyGate(gate.leftGate);
                 } else if (gate.rightGate) {
@@ -353,41 +365,89 @@ export class Game {
     }
 
     applyGate(gateData) {
-        const currentCount = this.crowdManager.getPlayerCount();
-        let newCount = currentCount;
-
-        switch (gateData.op) {
-            case '+': newCount = currentCount + gateData.value; break;
-            case '-': newCount = Math.max(1, currentCount - gateData.value); break;
-            case '*': newCount = currentCount * gateData.value; break;
-            case '/': newCount = Math.max(1, Math.floor(currentCount / gateData.value)); break;
+        if (!gateData) return;
+        switch (gateData.type) {
+            case 'xp':
+                this.addHeroXP(gateData.value);
+                this.audio.playGateGood();
+                this.ui.showFloatingText(`+${gateData.value} XP`, '#00e5ff');
+                break;
+            case 'coins':
+                this.addCoins(gateData.value);
+                this.audio.playGateGood();
+                this.ui.showFloatingText(`+${gateData.value} 🪙`, '#ffd700');
+                break;
+            case 'hp':
+                this.healHero(gateData.value);
+                this.audio.playGateGood();
+                this.ui.showFloatingText(`+${gateData.value} HP`, '#00e676');
+                break;
+            case 'armor':
+                this.addHeroArmor(gateData.value);
+                this.audio.playGateGood();
+                this.ui.showFloatingText(`+${gateData.value} SHIELD`, '#ab47bc');
+                break;
+            case 'hazard':
+                this.damageHero(gateData.value);
+                this.audio.playGateBad();
+                this.ui.showFloatingText(`-${gateData.value} HP`, '#ff1744');
+                this.ui.screenShake(6);
+                break;
         }
-
-        newCount = Math.min(newCount, 200); // Cap at 200
-
-        if (newCount > currentCount) {
-            this.crowdManager.addToPlayerCrowd(newCount - currentCount);
-            this.audio.playGateGood();
-            this.ui.showFloatingText(`+${newCount - currentCount}`, '#4CAF50');
-            this.ui.screenShake(3);
-        } else if (newCount < currentCount) {
-            this.crowdManager.removeFromPlayerCrowd(currentCount - newCount);
-            this.audio.playGateBad();
-            this.ui.showFloatingText(`-${currentCount - newCount}`, '#f44336');
-            this.ui.screenShake(5);
-        }
+        this.ui.updateHUDInfo();
     }
 
-    highlightGate(gate, side) {
-        const mesh = side === 'left' ? gate.leftMesh : gate.rightMesh;
-        if (mesh) {
-            mesh.material.emissive = new THREE.Color(0xffffff);
-            mesh.material.emissiveIntensity = 0.5;
-            setTimeout(() => {
-                if (mesh.material) {
-                    mesh.material.emissiveIntensity = 0;
-                }
-            }, 300);
+    addCoins(amount) {
+        this.coins += amount;
+        this.saveProgress();
+    }
+
+    addHeroXP(amount) {
+        this.heroXP += amount;
+        while (this.heroXP >= this.heroMaxXP) {
+            this.heroXP -= this.heroMaxXP;
+            this.heroLevel++;
+            this.heroMaxXP = Math.floor(this.heroMaxXP * 1.35);
+            this.heroMaxHP += 20;
+            this.heroHP = this.heroMaxHP; // Full heal on level up
+            this.heroAttack += 5;
+            this.heroMaxArmor += 10;
+            this.heroArmor = this.heroMaxArmor;
+            this.audio.playWin();
+            this.ui.showFloatingText(`⭐ LEVEL UP! Lv.${this.heroLevel}`, '#ffd700');
+            this.ui.screenShake(6);
+            this.crowdManager.triggerLevelUpEffect();
+        }
+        this.saveProgress();
+        this.ui.updateHUDInfo();
+    }
+
+    healHero(amount) {
+        this.heroHP = Math.min(this.heroMaxHP, this.heroHP + amount);
+        this.ui.updateHUDInfo();
+    }
+
+    addHeroArmor(amount) {
+        this.heroArmor = Math.min(this.heroMaxArmor * 1.5, this.heroArmor + amount);
+        this.ui.updateHUDInfo();
+    }
+
+    damageHero(amount) {
+        if (this.heroArmor > 0) {
+            if (this.heroArmor >= amount) {
+                this.heroArmor -= amount;
+                amount = 0;
+            } else {
+                amount -= this.heroArmor;
+                this.heroArmor = 0;
+            }
+        }
+        if (amount > 0) {
+            this.heroHP = Math.max(0, this.heroHP - amount);
+        }
+        this.ui.updateHUDInfo();
+        if (this.heroHP <= 0) {
+            this.loseGame();
         }
     }
 
@@ -398,25 +458,18 @@ export class Game {
             const obsZ = -obs.z;
             const playerZ = -this.trackZ;
 
-            if (Math.abs(playerZ - obsZ) < 1.5) {
-                // Check X overlap
-                const playerLeft = this.playerX - 1.5;
-                const playerRight = this.playerX + 1.5;
+            if (Math.abs(playerZ - obsZ) < 1.4) {
+                const playerLeft = this.playerX - 0.7;
+                const playerRight = this.playerX + 0.7;
                 const obsLeft = obs.x - obs.width / 2;
                 const obsRight = obs.x + obs.width / 2;
 
                 if (playerRight > obsLeft && playerLeft < obsRight) {
-                    // Hit obstacle
-                    const loss = Math.ceil(this.crowdManager.getPlayerCount() * 0.3);
-                    this.crowdManager.removeFromPlayerCrowd(loss);
                     obs.passed = true;
+                    this.damageHero(25);
                     this.audio.playHit();
                     this.ui.screenShake(8);
-                    this.ui.showFloatingText(`-${loss}`, '#ff5722');
-
-                    if (this.crowdManager.getPlayerCount() <= 0) {
-                        this.loseGame();
-                    }
+                    this.ui.showFloatingText('-25 HP', '#ff5722');
                 }
             }
         }
@@ -429,8 +482,7 @@ export class Game {
             const enemyZ = -enemy.z;
             const playerZ = -this.trackZ;
 
-            if (Math.abs(playerZ - enemyZ) < 2.0) {
-                // Start fight - switch to fighting state
+            if (Math.abs(playerZ - enemyZ) < 1.8) {
                 this.state = 'fighting';
                 this.fightingEnemy = enemy;
                 this.fightingEnemy.remainingCount = enemy.count;
@@ -439,12 +491,11 @@ export class Game {
                 this.fightTickCount = 0;
                 this.speed = 0;
                 this.audio.playHit();
-                this.ui.screenShake(10);
+                this.ui.screenShake(8);
 
-                // Big opening clash flashes and slash arcs
-                const clashPos = new THREE.Vector3(this.playerX * 0.4, 0.9, -this.trackZ - 0.8);
+                const clashPos = new THREE.Vector3(this.playerX, 0.9, -this.trackZ - 0.7);
                 this.crowdManager.spawnImpactFlash(clashPos, 0xFFFFFF);
-                this.crowdManager.spawnSlash(clashPos, null, 0x00f0ff, 1.3);
+                this.crowdManager.spawnSlash(clashPos, null, 0x00f0ff, 1.4);
                 this.crowdManager.spawnSparks(clashPos, 0xFFAA00, 10);
                 return;
             }
@@ -452,64 +503,39 @@ export class Game {
     }
 
     updateFight(delta) {
-        const playerCount = this.crowdManager.getPlayerCount();
         const enemy = this.fightingEnemy;
         if (!enemy) return;
 
-        // Ratio of player to enemy army size
-        const ratio = playerCount / Math.max(1, enemy.remainingCount);
-
-        // Dynamic combat speed: energetic rapid strikes when outnumbering opponents
-        let currentInterval = 0.12;
-        if (ratio >= 3.5) {
-            currentInterval = 0.065;
-        } else if (ratio >= 2.0) {
-            currentInterval = 0.085;
-        }
-
         this.fightTimer += delta;
+        const strikeInterval = 0.12;
 
-        if (this.fightTimer >= currentInterval) {
-            this.fightTimer -= currentInterval;
+        if (this.fightTimer >= strikeInterval) {
+            this.fightTimer -= strikeInterval;
             this.fightTickCount = (this.fightTickCount || 0) + 1;
 
-            const strength = this.strengthUpgrade || 1;
-
-            // Player kills enemy stickmen - scales up if player crowd is significantly larger
-            let killsMultiplier = 1;
-            if (ratio >= 3.5) {
-                killsMultiplier = Math.min(5, Math.ceil(ratio * 0.75));
-            } else if (ratio >= 1.8) {
-                killsMultiplier = 2;
-            }
-            const enemyKills = Math.min(strength * killsMultiplier, enemy.remainingCount);
+            // Hero strikes enemies with weapon attack power
+            const killsPerStrike = this.heroAttack >= 25 ? 2 : 1;
+            const enemyKills = Math.min(killsPerStrike, enemy.remainingCount);
             enemy.remainingCount -= enemyKills;
 
-            // Enemy kills player stickmen - reduced casualties when outnumbering
-            let playerTakesCasualty = true;
-            if (ratio >= 4.0) {
-                playerTakesCasualty = (this.fightTickCount % 3 === 0);
-            } else if (ratio >= 2.2) {
-                playerTakesCasualty = (this.fightTickCount % 2 === 0);
+            // Enemy strikes back at hero
+            if (enemy.remainingCount > 0 && (this.fightTickCount % 2 === 0)) {
+                const enemyDmg = Math.min(enemy.remainingCount * 2, 8);
+                this.damageHero(enemyDmg);
+                this.crowdManager.spawnDeathEffect(this.playerX, -this.trackZ, 0x00f0ff);
             }
 
-            if (enemy.remainingCount > 0 && playerTakesCasualty && playerCount > 1) {
-                this.crowdManager.removeFromPlayerCrowd(1);
-                const playerCol = (this.equippedSkin === 'rainbow') ? 0x00f0ff : this.getPlayerColor();
-                this.crowdManager.spawnDeathEffect(this.playerX, -this.trackZ, playerCol);
-            }
-
-            // Defeated enemy stickmen launch backward as ragdolls with crimson sparks
+            // Defeated enemy effects
             if (enemyKills > 0) {
                 if (!enemy.isBoss) {
                     this.levelGenerator.removeEnemyStickman(enemy, enemyKills, this.crowdManager);
                 }
-                const enemyX = (Math.random() - 0.5) * 2;
+                const enemyX = (Math.random() - 0.5) * 1.5;
                 this.crowdManager.spawnDeathEffect(enemyX, -enemy.z, 0xf44336);
                 this.audio.playFightHit();
             }
 
-            // Update enemy visual count or boss health bar
+            // Update enemy label / boss bar
             if (enemy.isBoss) {
                 this.ui.updateBossHealthBar(enemy.remainingCount, enemy.count);
                 this.levelGenerator.shakeBoss();
@@ -517,41 +543,34 @@ export class Game {
                 this.levelGenerator.updateEnemyLabel(enemy);
             }
 
-            // Check fight outcome
+            // Check outcome
             if (enemy.remainingCount <= 0) {
-                // Player wins
                 enemy.defeated = true;
                 if (enemy.isBoss) {
-                    // Boss defeat animation
                     this.ui.hideBossHealthBar();
                     this.levelGenerator.playBossDefeatAnimation();
-                    this.ui.screenShake(15);
-                    this.crowdManager.spawnSparks(
-                        new THREE.Vector3(0, 3, -enemy.z), 0x9C27B0, 20
-                    );
-                    // Delay win screen for dramatic effect
+                    this.ui.screenShake(14);
+                    this.crowdManager.spawnSparks(new THREE.Vector3(0, 3, -enemy.z), 0x9C27B0, 20);
                     setTimeout(() => this.winGame(), 1200);
                     this.state = 'boss_defeated';
                     this.fightingEnemy = null;
-                    this.fightCameraTime = 0;
                 } else {
                     this.crowdManager.removeEnemyCrowd(enemy);
+                    this.addHeroXP(35);
+                    this.addCoins(10 + this.level * 2);
+                    this.ui.showFloatingText('+35 XP', '#00e5ff');
                     this.state = 'playing';
                     this.speed = 9;
                     this.fightingEnemy = null;
                     this.fightCameraTime = 0;
-                    this.camera.position.y = 12;
                 }
-            } else if (this.crowdManager.getPlayerCount() <= 0) {
-                // Player loses
+            } else if (this.heroHP <= 0) {
                 this.ui.hideBossHealthBar();
                 this.loseGame();
                 this.fightingEnemy = null;
-                this.fightCameraTime = 0;
             }
         }
 
-        // Update death particles
         this.crowdManager.updateParticles(delta);
     }
 
@@ -562,7 +581,6 @@ export class Game {
             return;
         }
 
-        // Start boss fight in fighting mode
         this.state = 'fighting';
         this.audio.playBossAppear();
         this.ui.screenShake(12);
@@ -578,10 +596,8 @@ export class Game {
         this.fightTimer = 0;
         this.speed = 0;
 
-        // Show boss health bar
         this.ui.showBossHealthBar(boss.health);
 
-        // Override updateFight end condition for boss
         const originalCheck = this.fightingEnemy;
         Object.defineProperty(originalCheck, 'defeated', {
             get: () => boss.defeated,
@@ -591,9 +607,10 @@ export class Game {
 
     winGame() {
         this.state = 'win';
-        const earnedCoins = Math.floor(this.crowdManager.getPlayerCount() * 2 + this.level * 10);
+        const earnedCoins = Math.floor(15 + this.level * 10 + this.heroLevel * 5);
         this.coins += earnedCoins;
         this.level++;
+        this.addHeroXP(50);
         this.saveProgress();
         this.audio.stopMusic();
         this.audio.playWin();
@@ -611,10 +628,13 @@ export class Game {
     }
 
     upgradecrowd() {
-        const cost = this.crowdUpgrade * 50;
+        // Alias for Hero Vitality (HP & Armor)
+        const cost = this.healthUpgrade * 50;
         if (this.coins >= cost) {
             this.coins -= cost;
-            this.crowdUpgrade++;
+            this.healthUpgrade++;
+            this.crowdUpgrade = this.healthUpgrade;
+            this.calculateHeroStats();
             this.saveProgress();
             return true;
         }
@@ -622,10 +642,12 @@ export class Game {
     }
 
     upgradeStrength() {
+        // Hero Weapon Attack Power
         const cost = this.strengthUpgrade * 75;
         if (this.coins >= cost) {
             this.coins -= cost;
             this.strengthUpgrade++;
+            this.calculateHeroStats();
             this.saveProgress();
             return true;
         }
@@ -693,7 +715,6 @@ export class Game {
 
     applyTheme() {
         const theme = this.getActiveTheme();
-        // Update sky gradient background
         const skyCanvas = document.createElement('canvas');
         skyCanvas.width = 512;
         skyCanvas.height = 512;
@@ -712,8 +733,6 @@ export class Game {
         if (this.renderer) {
             this.renderer.setClearColor(theme.fog || 0x7dd3fc, 1);
         }
-        // Linear fog keeps the track, gates, crowd and enemies crisp up to 110 units ahead,
-        // while softly blending the distant scenery into the sky between 110 and 280 units
         this.scene.fog = new THREE.Fog(theme.fog || 0x7dd3fc, 110, 280);
 
         if (this.hemiLight) {
@@ -726,7 +745,11 @@ export class Game {
         const data = {
             level: this.level,
             coins: this.coins,
-            crowdUpgrade: this.crowdUpgrade,
+            heroLevel: this.heroLevel,
+            heroXP: this.heroXP,
+            heroMaxXP: this.heroMaxXP,
+            healthUpgrade: this.healthUpgrade,
+            crowdUpgrade: this.healthUpgrade,
             strengthUpgrade: this.strengthUpgrade,
             ownedSkins: this.skins.filter(s => s.owned).map(s => s.id),
             equippedSkin: this.equippedSkin,
@@ -742,7 +765,11 @@ export class Game {
             const parsed = JSON.parse(data);
             this.level = parsed.level || 1;
             this.coins = parsed.coins || 0;
-            this.crowdUpgrade = parsed.crowdUpgrade || 1;
+            this.heroLevel = parsed.heroLevel || 1;
+            this.heroXP = parsed.heroXP || 0;
+            this.heroMaxXP = parsed.heroMaxXP || 100;
+            this.healthUpgrade = parsed.healthUpgrade || parsed.crowdUpgrade || 1;
+            this.crowdUpgrade = this.healthUpgrade;
             this.strengthUpgrade = parsed.strengthUpgrade || 1;
             if (parsed.ownedSkins) {
                 this.skins.forEach(s => { s.owned = parsed.ownedSkins.includes(s.id); });
@@ -752,6 +779,7 @@ export class Game {
                 this.themes.forEach(t => { t.owned = parsed.ownedThemes.includes(t.id); });
             }
             if (parsed.equippedTheme) this.equippedTheme = parsed.equippedTheme;
+            this.calculateHeroStats();
         }
     }
 

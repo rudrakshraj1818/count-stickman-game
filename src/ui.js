@@ -14,6 +14,10 @@ export class UIManager {
         this.levelDisplay = document.getElementById('level-display');
         this.coinDisplay = document.getElementById('coin-display');
         this.countDisplay = document.getElementById('count-display');
+        this.hpText = document.getElementById('hp-text');
+        this.armorText = document.getElementById('armor-text');
+        this.heroLvlText = document.getElementById('hero-lvl-text');
+        this.xpText = document.getElementById('xp-text');
         
         // Upgrade elements
         this.crowdLevel = document.getElementById('crowd-level');
@@ -241,22 +245,16 @@ export class UIManager {
     }
 
     updateHUDInfo() {
-        this.levelDisplay.textContent = `Level ${this.game.level}`;
-        this.coinDisplay.textContent = `🪙 ${this.game.coins}`;
+        if (this.levelDisplay) this.levelDisplay.textContent = `Track ${this.game.level}`;
+        if (this.coinDisplay) this.coinDisplay.textContent = `🪙 ${this.game.coins}`;
+        if (this.hpText) this.hpText.textContent = `${Math.max(0, Math.ceil(this.game.heroHP))}/${this.game.heroMaxHP}`;
+        if (this.armorText) this.armorText.textContent = `${Math.max(0, Math.ceil(this.game.heroArmor))}`;
+        if (this.heroLvlText) this.heroLvlText.textContent = `Lv.${this.game.heroLevel}`;
+        if (this.xpText) this.xpText.textContent = `${this.game.heroXP}/${this.game.heroMaxXP}`;
     }
 
     updateCount(count) {
-        this.countDisplay.textContent = `👥 ${count}`;
-        // Pulse the count display when count changes significantly
-        if (Math.abs(count - this.prevCount) > 2) {
-            this.countDisplay.style.transform = 'scale(1.3)';
-            this.countDisplay.style.transition = 'transform 0.15s ease';
-            setTimeout(() => {
-                this.countDisplay.style.transform = 'scale(1)';
-                setTimeout(() => { this.countDisplay.style.transition = ''; }, 150);
-            }, 150);
-        }
-        this.prevCount = count;
+        this.updateHUDInfo();
     }
 
     showUpgrades() {
