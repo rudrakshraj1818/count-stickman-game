@@ -181,7 +181,7 @@ export class Game {
         canvas.addEventListener('mousemove', (e) => {
             if (!this.isDragging || this.state !== 'playing') return;
             const deltaX = (e.clientX - this.lastInputX) * 0.02;
-            this.playerX = Math.max(-3.5, Math.min(3.5, this.playerX + deltaX));
+            this.playerX = Math.max(-4.4, Math.min(4.4, this.playerX + deltaX));
             this.lastInputX = e.clientX;
         });
         canvas.addEventListener('mouseup', () => { this.isDragging = false; });
@@ -196,7 +196,7 @@ export class Game {
         canvas.addEventListener('touchmove', (e) => {
             if (!this.isDragging || this.state !== 'playing') return;
             const deltaX = (e.touches[0].clientX - this.lastInputX) * 0.02;
-            this.playerX = Math.max(-3.5, Math.min(3.5, this.playerX + deltaX));
+            this.playerX = Math.max(-4.4, Math.min(4.4, this.playerX + deltaX));
             this.lastInputX = e.touches[0].clientX;
         });
         canvas.addEventListener('touchend', () => { this.isDragging = false; });
@@ -270,13 +270,15 @@ export class Game {
             this.ui.updateHUDInfo();
             
             // Third-Person Camera during fight
+            const pathCenterX = this.levelGenerator ? this.levelGenerator.getPathCenterX(this.trackZ) : 0;
+            const heroWorldX = pathCenterX + this.playerX;
             this.fightCameraTime = (this.fightCameraTime || 0) + delta;
             const shakeX = Math.sin(this.fightCameraTime * 25) * 0.08;
             const shakeY = Math.cos(this.fightCameraTime * 30) * 0.05;
-            this.camera.position.x = this.playerX * 0.5 + shakeX;
-            this.camera.position.z = -this.trackZ + 4.8;
-            this.camera.position.y = 2.6 + shakeY;
-            this.camera.lookAt(this.playerX * 0.2, 1.25, -this.trackZ - 6);
+            this.camera.position.x = heroWorldX * 0.65 + shakeX;
+            this.camera.position.z = -this.trackZ + 5.0;
+            this.camera.position.y = 2.8 + shakeY;
+            this.camera.lookAt(heroWorldX * 0.3, 1.25, -this.trackZ - 6);
             return;
         }
 
@@ -284,39 +286,43 @@ export class Game {
 
         // Keyboard steering
         if (this.keys['ArrowLeft'] || this.keys['a']) {
-            this.playerX = Math.max(-3.5, this.playerX - 8 * delta);
+            this.playerX = Math.max(-4.4, this.playerX - 9 * delta);
         }
         if (this.keys['ArrowRight'] || this.keys['d']) {
-            this.playerX = Math.min(3.5, this.playerX + 8 * delta);
+            this.playerX = Math.min(4.4, this.playerX + 9 * delta);
         }
 
         // Move forward continuously
         this.trackZ += this.speed * delta;
 
-        // Update single hero position
-        this.crowdManager.updatePlayerPosition(this.playerX, -this.trackZ);
+        // Update single hero world position along natural curving temple road
+        const pathCenterX = this.levelGenerator ? this.levelGenerator.getPathCenterX(this.trackZ) : 0;
+        const heroWorldX = pathCenterX + this.playerX;
+        this.crowdManager.updatePlayerPosition(heroWorldX, -this.trackZ);
 
-        // Third-Person Camera follow behind hero
-        const targetCamX = this.playerX * 0.7;
-        const targetCamY = 3.2;
+        // Third-Person Camera follow behind hero with forward road curve look-ahead
+        const targetCamX = heroWorldX * 0.82;
+        const targetCamY = 3.3;
         const targetCamZ = -this.trackZ + 5.8;
 
         this.camera.position.x += (targetCamX - this.camera.position.x) * Math.min(1, delta * 12);
         this.camera.position.y += (targetCamY - this.camera.position.y) * Math.min(1, delta * 8);
         this.camera.position.z = targetCamZ;
 
-        const lookTargetX = this.playerX * 0.35;
+        const aheadZ = this.trackZ + 18;
+        const aheadPathX = this.levelGenerator ? this.levelGenerator.getPathCenterX(aheadZ) : 0;
+        const lookTargetX = aheadPathX + this.playerX * 0.35;
         const lookTargetY = 1.35;
         const lookTargetZ = -this.trackZ - 14;
         this.camera.lookAt(lookTargetX, lookTargetY, lookTargetZ);
 
         // Update light position to follow hero
         this.directionalLight.position.set(
-            this.playerX + 10,
-            20,
-            -this.trackZ + 10
+            heroWorldX + 12,
+            22,
+            -this.trackZ + 12
         );
-        this.directionalLight.target.position.set(this.playerX, 0, -this.trackZ);
+        this.directionalLight.target.position.set(heroWorldX, 0, -this.trackZ);
         this.directionalLight.target.updateMatrixWorld();
 
         // Keep sun visible in the sky ahead
@@ -324,42 +330,71 @@ export class Game {
             this.sunGroup.position.set(35, 45, -this.trackZ - 120);
         }
 
-        // Check collisions
-        this.checkGateCollisions();
+        // Check collisions for collectibles, obstacles, enemies
+        this.checkCollectibleCollisions();
         this.checkObstacleCollisions();
         this.checkEnemyCollisions();
 
-        // Check if reached end (boss)
+        // Check if reached end: sprint through the Grand Temple Sanctuary Victory Portal
         if (this.trackZ >= this.trackLength) {
-            this.checkBossFight();
+            if (!this.levelGenerator.boss) {
+                this.winGame();
+            } else {
+                this.checkBossFight();
+            }
         }
 
-        // Update hero running animation
+        // Update hero running animation and dynamic level elements (coins spinning, relics bobbing)
         this.crowdManager.update(delta, false, null, this.playerX, this.trackZ);
         this.levelGenerator.updateEnemies(delta, false, null, this.playerX, this.trackZ, this.crowdManager);
+        this.levelGenerator.update(delta);
 
         // Update HUD
         this.ui.updateHUDInfo();
     }
 
-    checkGateCollisions() {
-        const gates = this.levelGenerator.gates;
-        for (let i = gates.length - 1; i >= 0; i--) {
-            const gate = gates[i];
-            if (gate.passed) continue;
+    checkCollectibleCollisions() {
+        if (!this.levelGenerator || !this.levelGenerator.collectibles) return;
+        const collectibles = this.levelGenerator.collectibles;
+        const pathCenterX = this.levelGenerator.getPathCenterX(this.trackZ);
+        const heroWorldX = pathCenterX + this.playerX;
+        const playerZ = this.trackZ;
 
-            const gateZ = -gate.z;
-            const playerZ = -this.trackZ;
+        for (let i = collectibles.length - 1; i >= 0; i--) {
+            const item = collectibles[i];
+            if (item.collected) continue;
 
-            // When hero touches or crosses any gate, apply effect and immediately remove gate
-            if (Math.abs(playerZ - gateZ) < 1.0 || this.trackZ >= gate.z) {
-                if (this.playerX < 0 && gate.leftGate) {
-                    this.applyGate(gate.leftGate);
-                } else if (gate.rightGate) {
-                    this.applyGate(gate.rightGate);
+            const dz = item.z - playerZ;
+            const dx = item.x - heroWorldX;
+            const dist = Math.hypot(dx, dz);
+
+            if (dist < (item.radius || 1.35)) {
+                item.collected = true;
+                if (item.mesh) {
+                    this.scene.remove(item.mesh);
                 }
-                gate.passed = true;
-                this.levelGenerator.removeGate(gate);
+
+                if (item.type === 'coin') {
+                    this.addCoins(item.value || 1);
+                    this.audio.playGateGood();
+                    this.ui.showFloatingText(`+${item.value || 1} 🪙`, '#ffd700');
+                    const sparkPos = new THREE.Vector3(item.x, 0.9, -item.z);
+                    this.crowdManager.spawnSparks(sparkPos, 0xffd700, 6);
+                } else if (item.type === 'health') {
+                    this.healHero(item.value || 30);
+                    this.audio.playGateGood();
+                    this.ui.showFloatingText(`+${item.value || 30} HP`, '#00e676');
+                    const flashPos = new THREE.Vector3(item.x, 1.1, -item.z);
+                    this.crowdManager.spawnImpactFlash(flashPos, 0x00e676);
+                } else if (item.type === 'powerup') {
+                    this.addHeroArmor(item.value || 25);
+                    this.addHeroXP(35);
+                    this.audio.playGateGood();
+                    this.ui.showFloatingText('+25 SHIELD & XP ⭐', '#00f0ff');
+                    const flashPos = new THREE.Vector3(item.x, 1.1, -item.z);
+                    this.crowdManager.spawnImpactFlash(flashPos, 0x00f0ff);
+                }
+                this.ui.updateHUDInfo();
             }
         }
     }
@@ -453,16 +488,20 @@ export class Game {
 
     checkObstacleCollisions() {
         const obstacles = this.levelGenerator.obstacles;
+        if (!obstacles) return;
+        const pathCenterX = this.levelGenerator ? this.levelGenerator.getPathCenterX(this.trackZ) : 0;
+        const heroWorldX = pathCenterX + this.playerX;
+
         for (const obs of obstacles) {
             if (obs.passed) continue;
             const obsZ = -obs.z;
             const playerZ = -this.trackZ;
 
-            if (Math.abs(playerZ - obsZ) < 1.4) {
-                const playerLeft = this.playerX - 0.7;
-                const playerRight = this.playerX + 0.7;
-                const obsLeft = obs.x - obs.width / 2;
-                const obsRight = obs.x + obs.width / 2;
+            if (Math.abs(playerZ - obsZ) < 1.35) {
+                const playerLeft = heroWorldX - 0.65;
+                const playerRight = heroWorldX + 0.65;
+                const obsLeft = obs.worldX - obs.width / 2;
+                const obsRight = obs.worldX + obs.width / 2;
 
                 if (playerRight > obsLeft && playerLeft < obsRight) {
                     obs.passed = true;
@@ -477,6 +516,10 @@ export class Game {
 
     checkEnemyCollisions() {
         const enemies = this.levelGenerator.enemies;
+        if (!enemies) return;
+        const pathCenterX = this.levelGenerator ? this.levelGenerator.getPathCenterX(this.trackZ) : 0;
+        const heroWorldX = pathCenterX + this.playerX;
+
         for (const enemy of enemies) {
             if (enemy.defeated) continue;
             const enemyZ = -enemy.z;
@@ -493,7 +536,7 @@ export class Game {
                 this.audio.playHit();
                 this.ui.screenShake(8);
 
-                const clashPos = new THREE.Vector3(this.playerX, 0.9, -this.trackZ - 0.7);
+                const clashPos = new THREE.Vector3(heroWorldX, 0.9, -this.trackZ - 0.7);
                 this.crowdManager.spawnImpactFlash(clashPos, 0xFFFFFF);
                 this.crowdManager.spawnSlash(clashPos, null, 0x00f0ff, 1.4);
                 this.crowdManager.spawnSparks(clashPos, 0xFFAA00, 10);
