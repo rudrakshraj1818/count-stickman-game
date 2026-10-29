@@ -79,8 +79,9 @@ export class Game {
         // Swipe & Touch Tracking
         this.touchStartX = 0;
         this.touchStartY = 0;
-        this.touchStartTime = 0;
-        this.swipeTriggered = false;
+        this.swipeConsumed = false;
+        this.SWIPE_THRESHOLD_X = 45;
+        this.SWIPE_THRESHOLD_Y = 45;
         this.isDragging = false;
         this.keys = {};
         
@@ -225,72 +226,77 @@ export class Game {
     setupInput() {
         const canvas = this.renderer.domElement;
         
+        const resetGesture = () => {
+            this.isDragging = false;
+            this.swipeConsumed = false;
+        };
+
+        const processGestureMove = (currentX, currentY) => {
+            if (!this.isDragging || this.state !== 'playing' || this.swipeConsumed) return;
+            
+            const dx = currentX - this.touchStartX;
+            const dy = currentY - this.touchStartY;
+            const absX = Math.abs(dx);
+            const absY = Math.abs(dy);
+
+            // Intentional horizontal swipe threshold (45px)
+            if (absX >= this.SWIPE_THRESHOLD_X && absX > absY) {
+                // Exactly ONE lane change to the left or right
+                if (dx > 0) {
+                    this.changeLane(1);
+                } else {
+                    this.changeLane(-1);
+                }
+                // Lock this gesture completely until the finger/mouse is released!
+                this.swipeConsumed = true;
+            } else if (absY >= this.SWIPE_THRESHOLD_Y && absY >= absX) {
+                // Vertical jump / slide gesture
+                if (dy < 0) {
+                    this.jump();
+                } else {
+                    this.slide();
+                }
+                // Lock this gesture completely until the finger/mouse is released!
+                this.swipeConsumed = true;
+            }
+        };
+
         // Mouse swipe gestures
         canvas.addEventListener('mousedown', (e) => {
             if (this.state !== 'playing') return;
             this.isDragging = true;
             this.touchStartX = e.clientX;
             this.touchStartY = e.clientY;
-            this.swipeTriggered = false;
+            this.swipeConsumed = false;
         });
 
         canvas.addEventListener('mousemove', (e) => {
-            if (!this.isDragging || this.state !== 'playing') return;
-            const dx = e.clientX - this.touchStartX;
-            const dy = e.clientY - this.touchStartY;
-            const dist = Math.hypot(dx, dy);
-
-            if (!this.swipeTriggered && dist >= 32) {
-                this.swipeTriggered = true;
-                if (Math.abs(dx) > Math.abs(dy)) {
-                    if (dx > 0) this.changeLane(1);
-                    else this.changeLane(-1);
-                } else {
-                    if (dy < 0) this.jump();
-                    else this.slide();
-                }
-                this.touchStartX = e.clientX;
-                this.touchStartY = e.clientY;
-                this.swipeTriggered = false;
-            }
+            processGestureMove(e.clientX, e.clientY);
         });
 
-        canvas.addEventListener('mouseup', () => { this.isDragging = false; });
-        canvas.addEventListener('mouseleave', () => { this.isDragging = false; });
+        canvas.addEventListener('mouseup', resetGesture);
+        canvas.addEventListener('mouseleave', resetGesture);
+        window.addEventListener('mouseup', resetGesture);
 
-        // Touch swipe gestures
+        // Touch swipe gestures for mobile
         canvas.addEventListener('touchstart', (e) => {
             if (this.state !== 'playing') return;
             this.isDragging = true;
             const touch = e.touches[0];
             this.touchStartX = touch.clientX;
             this.touchStartY = touch.clientY;
-            this.swipeTriggered = false;
+            this.swipeConsumed = false;
         }, { passive: true });
 
         canvas.addEventListener('touchmove', (e) => {
-            if (!this.isDragging || this.state !== 'playing') return;
+            if (!this.isDragging || this.swipeConsumed) return;
             const touch = e.touches[0];
-            const dx = touch.clientX - this.touchStartX;
-            const dy = touch.clientY - this.touchStartY;
-            const dist = Math.hypot(dx, dy);
-
-            if (!this.swipeTriggered && dist >= 30) {
-                this.swipeTriggered = true;
-                if (Math.abs(dx) > Math.abs(dy)) {
-                    if (dx > 0) this.changeLane(1);
-                    else this.changeLane(-1);
-                } else {
-                    if (dy < 0) this.jump();
-                    else this.slide();
-                }
-                this.touchStartX = touch.clientX;
-                this.touchStartY = touch.clientY;
-                this.swipeTriggered = false;
-            }
+            processGestureMove(touch.clientX, touch.clientY);
         }, { passive: true });
 
-        canvas.addEventListener('touchend', () => { this.isDragging = false; });
+        canvas.addEventListener('touchend', resetGesture, { passive: true });
+        canvas.addEventListener('touchcancel', resetGesture, { passive: true });
+        window.addEventListener('touchend', resetGesture, { passive: true });
 
         // Keyboard controls (Discrete lane switches & jump/slide)
         window.addEventListener('keydown', (e) => {
@@ -322,6 +328,8 @@ export class Game {
         this.jumpVelocity = 0;
         this.isSliding = false;
         this.slideTimer = 0;
+        this.isDragging = false;
+        this.swipeConsumed = false;
         this.invulnerableTimer = 0;
         this.enemyAttackTimer = 0;
         this.heroStrikeTimer = 0;
