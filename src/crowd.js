@@ -392,11 +392,15 @@ export class CrowdManager {
         return (this.game && this.game.heroHP > 0) ? 1 : 0;
     }
 
-    updatePlayerPosition(x, z, jumpY = 0, isSliding = false) {
+    updatePlayerPosition(x, z, jumpY = 0, isSliding = false, roadAngle = 0) {
         this.currentJumpY = jumpY;
         this.currentIsSliding = isSliding;
         if (this.heroGroup) {
             this.heroGroup.position.set(x, jumpY, z);
+            if (this.heroModel) {
+                const targetRotY = roadAngle + (this.horizontalVel || 0) * 0.04;
+                this.heroModel.rotation.y += (targetRotY - this.heroModel.rotation.y) * 0.25;
+            }
             if (this.heroShadow) {
                 this.heroShadow.position.y = -jumpY + 0.02;
                 const shadowScale = Math.max(0.35, 1.0 - jumpY * 0.28);

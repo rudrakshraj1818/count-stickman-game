@@ -10,6 +10,7 @@ export class LevelGenerator {
         this.enemies = [];
         this.boss = null;
         this.meshes = [];
+        this.animatedProps = [];
         this.animTime = 0;
     }
 
@@ -19,6 +20,7 @@ export class LevelGenerator {
         this.obstacles = [];
         this.enemies = [];
         this.boss = null;
+        this.animatedProps = [];
         this.meshes.forEach(m => {
             this.scene.remove(m);
             if (m.geometry) m.geometry.dispose();
@@ -30,11 +32,22 @@ export class LevelGenerator {
         this.meshes = [];
     }
 
-    // Natural smooth serpentine road curvature
+    // Natural smooth serpentine road curvature - subtle gentle winding trail
     getPathCenterX(z) {
-        if (z < 25) return 0;
-        const blend = Math.min(1, (z - 25) / 15);
-        return (Math.sin(z * 0.045) * 2.2 + Math.cos(z * 0.02) * 0.8) * blend;
+        if (z < 18) return 0;
+        const blend = Math.min(1, (z - 18) / 14);
+        // Multi-frequency natural winding trail (gentle S-curves, max offset ~3.2m)
+        const curve1 = Math.sin((z - 18) * 0.052) * 2.2;
+        const curve2 = Math.sin((z - 18) * 0.024) * 1.1;
+        const curve3 = Math.cos((z - 18) * 0.088) * 0.4;
+        return (curve1 + curve2 + curve3) * blend;
+    }
+
+    // Tangent heading angle of the path at any distance z
+    getPathTangentAngle(z) {
+        const delta = 1.0;
+        const dx = this.getPathCenterX(z + delta) - this.getPathCenterX(z - delta);
+        return Math.atan2(dx, delta * 2);
     }
 
     // Defines 3-lane fork / path choice zones
@@ -53,127 +66,244 @@ export class LevelGenerator {
     }
 
     createTrack(trackLength) {
-        const segLen = 5;
+        const segLen = 2.5; // Short segments for silky smooth curvature
         const segCount = Math.ceil(trackLength / segLen);
 
-        // Weathered temple flagstone materials
-        const stonePalette = [
-            new THREE.MeshStandardMaterial({ color: 0xbaa482, roughness: 0.85, metalness: 0.1 }),
-            new THREE.MeshStandardMaterial({ color: 0xab9573, roughness: 0.88, metalness: 0.08 }),
-            new THREE.MeshStandardMaterial({ color: 0x9e8766, roughness: 0.82, metalness: 0.12 }),
-            new THREE.MeshStandardMaterial({ color: 0x8f7858, roughness: 0.9, metalness: 0.05 })
+        // Zone 1: Forest weathered flagstone & mossy soil
+        const forestPalette = [
+            new THREE.MeshStandardMaterial({ color: 0x827258, roughness: 0.88, metalness: 0.08 }),
+            new THREE.MeshStandardMaterial({ color: 0x75654c, roughness: 0.90, metalness: 0.05 }),
+            new THREE.MeshStandardMaterial({ color: 0x8a7b60, roughness: 0.86, metalness: 0.06 })
         ];
+        const forestCurbMat = new THREE.MeshStandardMaterial({ color: 0x3d3124, roughness: 0.92 });
+        const forestBedMat = new THREE.MeshStandardMaterial({ color: 0x241c14, roughness: 0.95 });
 
-        const curbMat = new THREE.MeshStandardMaterial({
-            color: 0x544332,
-            roughness: 0.9,
-            metalness: 0.15
+        // Zone 2: Ancient Ruins sun-bleached sandstone & weathered granite
+        const ruinPalette = [
+            new THREE.MeshStandardMaterial({ color: 0xb5a082, roughness: 0.84, metalness: 0.10 }),
+            new THREE.MeshStandardMaterial({ color: 0xa89476, roughness: 0.86, metalness: 0.08 }),
+            new THREE.MeshStandardMaterial({ color: 0x9e8a6c, roughness: 0.82, metalness: 0.12 })
+        ];
+        const ruinCurbMat = new THREE.MeshStandardMaterial({ color: 0x544434, roughness: 0.88 });
+        const ruinBedMat = new THREE.MeshStandardMaterial({ color: 0x3e3226, roughness: 0.94 });
+
+        // Zone 3: Magical Temple polished obsidian & basalt with runic inlay channels
+        const templePalette = [
+            new THREE.MeshStandardMaterial({ color: 0x1e2230, roughness: 0.55, metalness: 0.5 }),
+            new THREE.MeshStandardMaterial({ color: 0x262b3d, roughness: 0.58, metalness: 0.45 }),
+            new THREE.MeshStandardMaterial({ color: 0x1b1f2c, roughness: 0.60, metalness: 0.55 })
+        ];
+        const templeCurbMat = new THREE.MeshStandardMaterial({ color: 0x121520, roughness: 0.7, metalness: 0.75 });
+        const templeBedMat = new THREE.MeshStandardMaterial({ color: 0x0c0e16, roughness: 0.9 });
+        const templeRuneMat = new THREE.MeshStandardMaterial({
+            color: 0x00f0ff,
+            emissive: 0x00d8f6,
+            emissiveIntensity: 0.75,
+            roughness: 0.2
         });
 
-        const dividerMat = new THREE.MeshStandardMaterial({
-            color: 0x6e5944,
-            roughness: 0.85,
-            metalness: 0.1
-        });
+        const dividerMat = new THREE.MeshStandardMaterial({ color: 0x584635, roughness: 0.85 });
 
-        // 1. Build segmented curving natural stone highway with focused 3-lane proportions
+        // Build continuous 3-lane integrated roadway along the organic serpentine trail
         for (let i = 0; i < segCount; i++) {
             const zStart = i * segLen;
             const zCenter = zStart + segLen / 2;
             const cx = this.getPathCenterX(zCenter);
+            const angle = this.getPathTangentAngle(zCenter);
             const isFork = this.isForkZone(zCenter);
-            // Focused 3-lane track proportions (reduced by ~35% from oversized 12.0m platform)
+            const isBridge = (zCenter >= 88 && zCenter <= 106);
             const roadWidth = isFork ? 8.8 : 7.6;
 
-            // Main stone road slab
-            const mat = stonePalette[i % stonePalette.length];
-            const slabGeo = new THREE.BoxGeometry(roadWidth, 0.25, segLen);
-            const slab = new THREE.Mesh(slabGeo, mat);
+            // Zone material selection
+            let currentSlabMat;
+            let currentCurbMat;
+            let currentBedMat;
+
+            if (zCenter < 65) {
+                // Zone 1: Forest
+                currentSlabMat = forestPalette[i % forestPalette.length];
+                currentCurbMat = forestCurbMat;
+                currentBedMat = forestBedMat;
+            } else if (zCenter < 135) {
+                // Zone 2: Ruins
+                currentSlabMat = ruinPalette[i % ruinPalette.length];
+                currentCurbMat = ruinCurbMat;
+                currentBedMat = ruinBedMat;
+            } else {
+                // Zone 3: Magical Temple
+                currentSlabMat = templePalette[i % templePalette.length];
+                currentCurbMat = templeCurbMat;
+                currentBedMat = templeBedMat;
+            }
+
+            // 1. Earthen / Stone foundation embankment underneath (embeds road naturally into world)
+            if (!isBridge) {
+                const bedGeo = new THREE.BoxGeometry(roadWidth + 1.2, 0.3, segLen + 0.1);
+                const bed = new THREE.Mesh(bedGeo, currentBedMat);
+                bed.position.set(cx, -0.05, -zCenter);
+                bed.rotation.y = angle;
+                bed.receiveShadow = true;
+                bed.userData.dynamic = true;
+                this.scene.add(bed);
+                this.meshes.push(bed);
+            } else {
+                // Ruined Bridge section: stone bridge arch support piers descending into chasm
+                if (i % 2 === 0) {
+                    const pierGeo = new THREE.BoxGeometry(roadWidth + 0.6, 5.0, 1.4);
+                    const pierMat = new THREE.MeshStandardMaterial({ color: 0x483a2d, roughness: 0.9 });
+                    const pier = new THREE.Mesh(pierGeo, pierMat);
+                    pier.position.set(cx, -2.5, -zCenter);
+                    pier.rotation.y = angle;
+                    pier.castShadow = true;
+                    pier.userData.dynamic = true;
+                    this.scene.add(pier);
+                    this.meshes.push(pier);
+                }
+            }
+
+            // 2. Main playable 3-lane road slab
+            const slabGeo = new THREE.BoxGeometry(roadWidth, 0.25, segLen + 0.05);
+            const slab = new THREE.Mesh(slabGeo, currentSlabMat);
             slab.position.set(cx, 0.01, -zCenter);
+            slab.rotation.y = angle;
             slab.receiveShadow = true;
             slab.userData.dynamic = true;
             this.scene.add(slab);
             this.meshes.push(slab);
 
-            // Carved outer stone curbs cleanly framing the 3 lanes
-            const curbGeo = new THREE.BoxGeometry(0.4, 0.45, segLen);
-            
-            const leftCurb = new THREE.Mesh(curbGeo, curbMat);
-            leftCurb.position.set(cx - roadWidth / 2 - 0.2, 0.15, -zCenter);
+            // 3. Outer curbs cleanly framing the path
+            const curbHeight = isBridge ? 0.75 : 0.42; // Higher parapet on bridge
+            const curbGeo = new THREE.BoxGeometry(0.38, curbHeight, segLen + 0.05);
+
+            const cosA = Math.cos(angle);
+            const sinA = Math.sin(angle);
+            const halfW = roadWidth / 2 + 0.18;
+
+            const leftCurb = new THREE.Mesh(curbGeo, currentCurbMat);
+            leftCurb.position.set(cx - halfW * cosA, curbHeight / 2 - 0.08, -zCenter + halfW * sinA);
+            leftCurb.rotation.y = angle;
             leftCurb.castShadow = true;
             leftCurb.receiveShadow = true;
             leftCurb.userData.dynamic = true;
             this.scene.add(leftCurb);
             this.meshes.push(leftCurb);
 
-            const rightCurb = new THREE.Mesh(curbGeo, curbMat);
-            rightCurb.position.set(cx + roadWidth / 2 + 0.2, 0.15, -zCenter);
+            const rightCurb = new THREE.Mesh(curbGeo, currentCurbMat);
+            rightCurb.position.set(cx + halfW * cosA, curbHeight / 2 - 0.08, -zCenter - halfW * sinA);
+            rightCurb.rotation.y = angle;
             rightCurb.castShadow = true;
             rightCurb.receiveShadow = true;
             rightCurb.userData.dynamic = true;
             this.scene.add(rightCurb);
             this.meshes.push(rightCurb);
 
-            // In fork zones: create dividing ancient ruin curb islands separating Left, Center, Right paths
+            // 4. 3-Lane dividers and markings
             if (isFork) {
-                const islandGeo = new THREE.BoxGeometry(0.38, 0.38, segLen);
-                
-                // Left divider island (splits Left path from Center path at x = -1.125)
+                // Fork zone island curbs
+                const islandGeo = new THREE.BoxGeometry(0.35, 0.38, segLen);
+                const divOffset = 1.125;
+
                 const leftIsland = new THREE.Mesh(islandGeo, dividerMat);
-                leftIsland.position.set(cx - 1.125, 0.15, -zCenter);
+                leftIsland.position.set(cx - divOffset * cosA, 0.14, -zCenter + divOffset * sinA);
+                leftIsland.rotation.y = angle;
                 leftIsland.castShadow = true;
                 leftIsland.userData.dynamic = true;
                 this.scene.add(leftIsland);
                 this.meshes.push(leftIsland);
 
-                // Right divider island (splits Center path from Right path at x = +1.125)
                 const rightIsland = new THREE.Mesh(islandGeo, dividerMat);
-                rightIsland.position.set(cx + 1.125, 0.15, -zCenter);
+                rightIsland.position.set(cx + divOffset * cosA, 0.14, -zCenter - divOffset * sinA);
+                rightIsland.rotation.y = angle;
                 rightIsland.castShadow = true;
                 rightIsland.userData.dynamic = true;
                 this.scene.add(rightIsland);
                 this.meshes.push(rightIsland);
 
-                // At the start of a fork section: place carved path choice obelisks/shrines!
                 if (zStart % 65 < segLen) {
                     this.createForkEntranceSign(cx, zStart);
                 }
             } else {
-                // Continuous carved stone lane divider grooves separating the 3 lanes (Left | Center | Right)
-                const laneDivMat = new THREE.MeshBasicMaterial({ color: 0x4e3e2c, transparent: true, opacity: 0.55 });
-                const leftDivGeo = new THREE.PlaneGeometry(0.1, segLen);
-                
-                const leftDiv = new THREE.Mesh(leftDivGeo, laneDivMat);
+                // Continuous 3-lane divider grooves / glowing rune lines
+                const divOffset = 1.125;
+                const isTemple = (zCenter >= 135);
+                const laneMat = isTemple ? templeRuneMat : new THREE.MeshBasicMaterial({ color: 0x483a2b, transparent: true, opacity: 0.55 });
+                const divGeo = new THREE.PlaneGeometry(isTemple ? 0.12 : 0.08, segLen);
+
+                const leftDiv = new THREE.Mesh(divGeo, laneMat);
                 leftDiv.rotation.x = -Math.PI / 2;
-                leftDiv.position.set(cx - 1.125, 0.14, -zCenter);
+                leftDiv.rotation.z = angle;
+                leftDiv.position.set(cx - divOffset * cosA, 0.14, -zCenter + divOffset * sinA);
                 leftDiv.userData.dynamic = true;
                 this.scene.add(leftDiv);
                 this.meshes.push(leftDiv);
 
-                const rightDiv = new THREE.Mesh(leftDivGeo, laneDivMat);
+                const rightDiv = new THREE.Mesh(divGeo, laneMat);
                 rightDiv.rotation.x = -Math.PI / 2;
-                rightDiv.position.set(cx + 1.125, 0.14, -zCenter);
+                rightDiv.rotation.z = angle;
+                rightDiv.position.set(cx + divOffset * cosA, 0.14, -zCenter - divOffset * sinA);
                 rightDiv.userData.dynamic = true;
                 this.scene.add(rightDiv);
                 this.meshes.push(rightDiv);
             }
 
-            // Flagstone transverse joint seams across the track every segment
-            const seamGeo = new THREE.PlaneGeometry(roadWidth - 0.2, 0.06);
-            const seamMat = new THREE.MeshBasicMaterial({ color: 0x423425, transparent: true, opacity: 0.4 });
-            const seam = new THREE.Mesh(seamGeo, seamMat);
-            seam.rotation.x = -Math.PI / 2;
-            seam.position.set(cx, 0.14, -zStart);
-            seam.userData.dynamic = true;
-            this.scene.add(seam);
-            this.meshes.push(seam);
+            // Transverse stone joint seams every few segments
+            if (i % 2 === 0) {
+                const seamGeo = new THREE.PlaneGeometry(roadWidth - 0.2, 0.05);
+                const seamMat = new THREE.MeshBasicMaterial({ color: 0x3d3123, transparent: true, opacity: 0.35 });
+                const seam = new THREE.Mesh(seamGeo, seamMat);
+                seam.rotation.x = -Math.PI / 2;
+                seam.rotation.z = angle;
+                seam.position.set(cx, 0.14, -zStart);
+                seam.userData.dynamic = true;
+                this.scene.add(seam);
+                this.meshes.push(seam);
+            }
 
-            // Stone torch braziers with warm fire light along the verges every ~18 units
-            if (i % 4 === 0) {
-                this.createBrazier(cx - roadWidth / 2 - 0.65, zCenter);
-                this.createBrazier(cx + roadWidth / 2 + 0.65, zCenter);
+            // Stone torch braziers placed along verges every ~20m
+            if (i % 8 === 0) {
+                const bOffset = roadWidth / 2 + 0.85;
+                const bLeftX = cx - bOffset * cosA;
+                const bLeftZ = zCenter - bOffset * sinA;
+                const bRightX = cx + bOffset * cosA;
+                const bRightZ = zCenter + bOffset * sinA;
+
+                if (zCenter >= 135) {
+                    this.createMysticBrazier(bLeftX, bLeftZ);
+                    this.createMysticBrazier(bRightX, bRightZ);
+                } else {
+                    this.createBrazier(bLeftX, bLeftZ);
+                    this.createBrazier(bRightX, bRightZ);
+                }
             }
         }
+
+        // Ruined Bridge sunken chasm water/mist plane (z = 84 to 110)
+        const chasmGeo = new THREE.PlaneGeometry(55, 30);
+        const chasmWaterMat = new THREE.MeshStandardMaterial({
+            color: 0x1a3d36,
+            roughness: 0.2,
+            metalness: 0.8
+        });
+        const chasmWater = new THREE.Mesh(chasmGeo, chasmWaterMat);
+        chasmWater.rotation.x = -Math.PI / 2;
+        chasmWater.position.set(this.getPathCenterX(97), -4.6, -97);
+        chasmWater.userData.dynamic = true;
+        this.scene.add(chasmWater);
+        this.meshes.push(chasmWater);
+
+        const mistGeo = new THREE.PlaneGeometry(50, 26);
+        const mistMat = new THREE.MeshBasicMaterial({
+            color: 0x98cfc0,
+            transparent: true,
+            opacity: 0.35,
+            side: THREE.DoubleSide
+        });
+        const chasmMist = new THREE.Mesh(mistGeo, mistMat);
+        chasmMist.rotation.x = -Math.PI / 2;
+        chasmMist.position.set(this.getPathCenterX(97), -3.2, -97);
+        chasmMist.userData.dynamic = true;
+        this.scene.add(chasmMist);
+        this.meshes.push(chasmMist);
 
         // 2. Grand Ancient Temple Start Gateway - Proportional to 3-lane road
         const startArchGroup = new THREE.Group();
@@ -410,7 +540,11 @@ export class LevelGenerator {
         const group = new THREE.Group();
         const laneX = laneIndex * laneWidth;
         const cx = this.getPathCenterX(z);
-        const worldX = cx + laneX;
+        const angle = this.getPathTangentAngle ? this.getPathTangentAngle(z) : 0;
+        const cosA = Math.cos(angle);
+        const sinA = Math.sin(angle);
+        const worldX = cx + laneX * cosA;
+        const worldZ = -z + laneX * sinA;
         
         // Shiny 3D golden coin with beveled rim
         const coinMat = new THREE.MeshStandardMaterial({
@@ -438,7 +572,8 @@ export class LevelGenerator {
         star.rotation.z = Math.PI / 4;
         group.add(star);
 
-        group.position.set(worldX, 0.85, -z);
+        group.position.set(worldX, 0.85, worldZ);
+        group.rotation.y = angle;
         group.userData.dynamic = true;
         this.scene.add(group);
         this.meshes.push(group);
@@ -461,7 +596,11 @@ export class LevelGenerator {
         const group = new THREE.Group();
         const laneX = laneIndex * laneWidth;
         const cx = this.getPathCenterX(z);
-        const worldX = cx + laneX;
+        const angle = this.getPathTangentAngle ? this.getPathTangentAngle(z) : 0;
+        const cosA = Math.cos(angle);
+        const sinA = Math.sin(angle);
+        const worldX = cx + laneX * cosA;
+        const worldZ = -z + laneX * sinA;
 
         // Floating emerald vitality flask
         const flaskMat = new THREE.MeshStandardMaterial({
@@ -491,7 +630,8 @@ export class LevelGenerator {
         aura.position.y = -0.55;
         group.add(aura);
 
-        group.position.set(worldX, 1.1, -z);
+        group.position.set(worldX, 1.1, worldZ);
+        group.rotation.y = angle;
         group.userData.dynamic = true;
         this.scene.add(group);
         this.meshes.push(group);
@@ -514,7 +654,11 @@ export class LevelGenerator {
         const group = new THREE.Group();
         const laneX = laneIndex * laneWidth;
         const cx = this.getPathCenterX(z);
-        const worldX = cx + laneX;
+        const angle = this.getPathTangentAngle ? this.getPathTangentAngle(z) : 0;
+        const cosA = Math.cos(angle);
+        const sinA = Math.sin(angle);
+        const worldX = cx + laneX * cosA;
+        const worldZ = -z + laneX * sinA;
 
         // Glowing celestial mystic shield relic
         const relicMat = new THREE.MeshStandardMaterial({
@@ -537,7 +681,8 @@ export class LevelGenerator {
         ring.rotation.x = Math.PI / 4;
         group.add(ring);
 
-        group.position.set(worldX, 1.15, -z);
+        group.position.set(worldX, 1.15, worldZ);
+        group.rotation.y = angle;
         group.userData.dynamic = true;
         this.scene.add(group);
         this.meshes.push(group);
@@ -577,42 +722,38 @@ export class LevelGenerator {
             if (attempts >= 40) continue;
 
             const cx = this.getPathCenterX(z);
+            const angle = this.getPathTangentAngle ? this.getPathTangentAngle(z) : 0;
+            const cosA = Math.cos(angle);
+            const sinA = Math.sin(angle);
+
             const laneIndices = [-1, 0, 1];
-            // Deterministic variety for balanced play
             const laneIndex = laneIndices[(i * 2 + 1) % 3];
             const laneX = laneIndex * LANE_WIDTH;
-            const worldX = cx + laneX;
-            // Obstacle width scaled to cleanly fit single 2.25m lane
+            const worldX = cx + laneX * cosA;
+            const worldZ = z - laneX * sinA;
             const width = 1.85;
 
-            // Pattern cycle:
-            // 0: low fallen pillar
-            // 1: high overhead beam
-            // 2: tall solid monolith
-            // 3: low spike trap
-            // 4: high collapsed arch
-            // 5: low altar barrier
             const typeIndex = i % 6;
             let obstacleType = 'low';
 
             if (typeIndex === 0) {
                 obstacleType = 'low';
-                this.createFallenPillarObstacle(worldX, z, width);
+                this.createFallenPillarObstacle(worldX, worldZ, width, angle);
             } else if (typeIndex === 1) {
                 obstacleType = 'high';
-                this.createOverheadBeamObstacle(worldX, z, width);
+                this.createOverheadBeamObstacle(worldX, worldZ, width, angle);
             } else if (typeIndex === 2) {
                 obstacleType = 'tall';
-                this.createMonolithObstacle(worldX, z, width);
+                this.createMonolithObstacle(worldX, worldZ, width, angle);
             } else if (typeIndex === 3) {
                 obstacleType = 'low';
-                this.createSpikeTrapObstacle(worldX, z, width);
+                this.createSpikeTrapObstacle(worldX, worldZ, width, angle);
             } else if (typeIndex === 4) {
                 obstacleType = 'high';
-                this.createArchDebrisObstacle(worldX, z, width);
+                this.createArchDebrisObstacle(worldX, worldZ, width, angle);
             } else {
                 obstacleType = 'low';
-                this.createAltarBarrierObstacle(worldX, z, width);
+                this.createAltarBarrierObstacle(worldX, worldZ, width, angle);
             }
 
             this.obstacles.push({
@@ -630,7 +771,7 @@ export class LevelGenerator {
     }
 
     // LOW OBSTACLE: Broken fluted pillar cylinder lying along the road (Jump to avoid)
-    createFallenPillarObstacle(x, z, width) {
+    createFallenPillarObstacle(x, z, width, angle = 0) {
         const group = new THREE.Group();
         const stoneMat = new THREE.MeshStandardMaterial({ color: 0x948067, roughness: 0.8, metalness: 0.1 });
         const crackedMat = new THREE.MeshStandardMaterial({ color: 0x6e5b46, roughness: 0.9 });
@@ -653,13 +794,14 @@ export class LevelGenerator {
         }
 
         group.position.set(x, 0, -z);
+        group.rotation.y = angle;
         group.userData.dynamic = true;
         this.scene.add(group);
         this.meshes.push(group);
     }
 
     // LOW OBSTACLE: Carved stone altar block with corner urns (Jump to avoid)
-    createAltarBarrierObstacle(x, z, width) {
+    createAltarBarrierObstacle(x, z, width, angle = 0) {
         const group = new THREE.Group();
         const stoneMat = new THREE.MeshStandardMaterial({ color: 0x8a7356, roughness: 0.78, metalness: 0.15 });
         const goldMat = new THREE.MeshStandardMaterial({ color: 0xd4af37, roughness: 0.4, metalness: 0.6 });
@@ -676,13 +818,14 @@ export class LevelGenerator {
         group.add(trim);
 
         group.position.set(x, 0, -z);
+        group.rotation.y = angle;
         group.userData.dynamic = true;
         this.scene.add(group);
         this.meshes.push(group);
     }
 
     // LOW OBSTACLE: Sunken spike trap in the road (Jump to avoid)
-    createSpikeTrapObstacle(x, z, width) {
+    createSpikeTrapObstacle(x, z, width, angle = 0) {
         const group = new THREE.Group();
         const plateMat = new THREE.MeshStandardMaterial({ color: 0x3d3328, roughness: 0.95 });
         const spikeMat = new THREE.MeshStandardMaterial({ color: 0x8a1c14, metalness: 0.8, roughness: 0.3 });
@@ -709,13 +852,14 @@ export class LevelGenerator {
         }
 
         group.position.set(x, 0, -z);
+        group.rotation.y = angle;
         group.userData.dynamic = true;
         this.scene.add(group);
         this.meshes.push(group);
     }
 
     // HIGH OBSTACLE: Overhead broken stone lintel beam suspended across the lane (Slide under to avoid)
-    createOverheadBeamObstacle(x, z, width) {
+    createOverheadBeamObstacle(x, z, width, angle = 0) {
         const group = new THREE.Group();
         const stoneMat = new THREE.MeshStandardMaterial({ color: 0x7a654e, roughness: 0.82 });
         const woodMat = new THREE.MeshStandardMaterial({ color: 0x4a3728, roughness: 0.9 });
@@ -749,13 +893,14 @@ export class LevelGenerator {
         }
 
         group.position.set(x, 0, -z);
+        group.rotation.y = angle;
         group.userData.dynamic = true;
         this.scene.add(group);
         this.meshes.push(group);
     }
 
     // HIGH OBSTACLE: Collapsed hanging arch lintel (Slide under to avoid)
-    createArchDebrisObstacle(x, z, width) {
+    createArchDebrisObstacle(x, z, width, angle = 0) {
         const group = new THREE.Group();
         const stoneMat = new THREE.MeshStandardMaterial({ color: 0x7e6952, roughness: 0.82 });
         const reliefMat = new THREE.MeshStandardMaterial({ color: 0xb59955, roughness: 0.5, metalness: 0.5 });
@@ -784,13 +929,14 @@ export class LevelGenerator {
         group.add(crest);
 
         group.position.set(x, 0, -z);
+        group.rotation.y = angle;
         group.userData.dynamic = true;
         this.scene.add(group);
         this.meshes.push(group);
     }
 
     // TALL OBSTACLE: Giant ancient stone monolith / totem obelisk (CANNOT jump or slide, MUST change lane)
-    createMonolithObstacle(x, z, width) {
+    createMonolithObstacle(x, z, width, angle = 0) {
         const group = new THREE.Group();
         const stoneMat = new THREE.MeshStandardMaterial({ color: 0x5a4d3f, roughness: 0.85, metalness: 0.1 });
         const runeMat = new THREE.MeshStandardMaterial({ 
@@ -821,6 +967,7 @@ export class LevelGenerator {
         group.add(rune);
 
         group.position.set(x, 0, -z);
+        group.rotation.y = angle;
         group.userData.dynamic = true;
         this.scene.add(group);
         this.meshes.push(group);
@@ -847,6 +994,21 @@ export class LevelGenerator {
                 // Floating and bobbing health & power-up relics
                 item.mesh.rotation.y += delta * 2.2;
                 item.mesh.position.y = 1.1 + Math.sin(this.animTime * 3 + item.phase) * 0.16;
+            }
+        }
+
+        // Animate dynamic environmental props (sunbeams, mana orbs, brazier flames)
+        for (const prop of this.animatedProps) {
+            if (!prop.mesh) continue;
+            if (prop.type === 'sunbeam' && prop.mesh.material) {
+                prop.mesh.material.opacity = 0.10 + Math.sin(this.animTime * 1.5 + prop.phase) * 0.035;
+            } else if (prop.type === 'manaOrb') {
+                prop.mesh.position.y = (prop.baseY || 1.8) + Math.sin(this.animTime * 2.6 + prop.phase) * 0.15;
+                prop.mesh.rotation.y += delta * 1.6;
+                prop.mesh.rotation.z += delta * 0.8;
+            } else if (prop.type === 'flame') {
+                prop.mesh.scale.y = 1.0 + Math.sin(this.animTime * 8.5 + prop.phase) * 0.15;
+                prop.mesh.scale.x = 1.0 + Math.cos(this.animTime * 7.5 + prop.phase) * 0.12;
             }
         }
     }
@@ -1080,7 +1242,7 @@ export class LevelGenerator {
     createBoss(level, trackLength) {
         this.boss = null; // No final boss monster yet per requirement 13
 
-        // Grand Ancient Temple Sanctuary & Victory Portal
+        // Grand Ancient Temple Sanctuary & Victory Portal aligned to curved path end
         const sanctuaryGroup = new THREE.Group();
         const templeStoneMat = new THREE.MeshStandardMaterial({ color: 0x8a7356, roughness: 0.75, metalness: 0.15 });
         const goldMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.85, roughness: 0.2 });
@@ -1088,7 +1250,7 @@ export class LevelGenerator {
         // Sanctuary stone floor dais scaled to 3-lane proportions
         const daisGeo = new THREE.BoxGeometry(11.0, 0.4, 18);
         const dais = new THREE.Mesh(daisGeo, templeStoneMat);
-        dais.position.set(0, 0.2, -trackLength);
+        dais.position.set(0, 0.2, 0);
         dais.receiveShadow = true;
         sanctuaryGroup.add(dais);
 
@@ -1097,36 +1259,36 @@ export class LevelGenerator {
             for (let c = 0; c < 3; c++) {
                 const colGeo = new THREE.CylinderGeometry(0.55, 0.65, 7.2, 12);
                 const col = new THREE.Mesh(colGeo, templeStoneMat);
-                col.position.set(side * 5.2, 3.8, -trackLength + (c - 1) * 5.5);
+                col.position.set(side * 5.2, 3.8, (c - 1) * 5.5);
                 col.castShadow = true;
                 sanctuaryGroup.add(col);
 
                 const colCap = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.5, 1.4), goldMat);
-                colCap.position.set(side * 5.2, 7.5, -trackLength + (c - 1) * 5.5);
+                colCap.position.set(side * 5.2, 7.5, (c - 1) * 5.5);
                 sanctuaryGroup.add(colCap);
             }
         }
 
         // Towering Grand Victory Archway
         const leftPylon = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.85, 9.2, 12), templeStoneMat);
-        leftPylon.position.set(-4.4, 4.6, -trackLength);
+        leftPylon.position.set(-4.4, 4.6, 0);
         leftPylon.castShadow = true;
         sanctuaryGroup.add(leftPylon);
 
         const rightPylon = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.85, 9.2, 12), templeStoneMat);
-        rightPylon.position.set(4.4, 4.6, -trackLength);
+        rightPylon.position.set(4.4, 4.6, 0);
         rightPylon.castShadow = true;
         sanctuaryGroup.add(rightPylon);
 
         const topArch = new THREE.Mesh(new THREE.BoxGeometry(10.0, 1.3, 1.6), templeStoneMat);
-        topArch.position.set(0, 9.2, -trackLength);
+        topArch.position.set(0, 9.2, 0);
         topArch.castShadow = true;
         sanctuaryGroup.add(topArch);
 
         // Ancient Sun-Disc Crest
         const sunDisc = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 0.35, 24), goldMat);
         sunDisc.rotation.x = Math.PI / 2;
-        sunDisc.position.set(0, 10.4, -trackLength);
+        sunDisc.position.set(0, 10.4, 0);
         sanctuaryGroup.add(sunDisc);
 
         // Radiant Mystic Victory Portal (Glow plane)
@@ -1138,13 +1300,13 @@ export class LevelGenerator {
             side: THREE.DoubleSide
         });
         const portal = new THREE.Mesh(portalGeo, portalMat);
-        portal.position.set(0, 4.2, -trackLength);
+        portal.position.set(0, 4.2, 0);
         sanctuaryGroup.add(portal);
 
         // Golden Victory Ring inside the portal
         const ringGeo = new THREE.TorusGeometry(2.8, 0.2, 16, 32);
         const ring = new THREE.Mesh(ringGeo, goldMat);
-        ring.position.set(0, 4.2, -trackLength + 0.1);
+        ring.position.set(0, 4.2, 0.1);
         sanctuaryGroup.add(ring);
 
         // Overhead Victory Banner
@@ -1170,12 +1332,13 @@ export class LevelGenerator {
         const labelGeo = new THREE.PlaneGeometry(5.2, 1.4);
         const labelMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
         const label = new THREE.Mesh(labelGeo, labelMat);
-        label.position.set(0, 11.6, -trackLength);
+        label.position.set(0, 11.6, 0);
         sanctuaryGroup.add(label);
 
-        // Ceremonial flame braziers on sanctuary approach
-        this.createBrazier(-4.3, trackLength - 4);
-        this.createBrazier(4.3, trackLength - 4);
+        const endCx = this.getPathCenterX(trackLength);
+        const endAngle = this.getPathTangentAngle ? this.getPathTangentAngle(trackLength) : 0;
+        sanctuaryGroup.position.set(endCx, 0, -trackLength);
+        sanctuaryGroup.rotation.y = endAngle;
 
         sanctuaryGroup.userData.dynamic = true;
         this.scene.add(sanctuaryGroup);
@@ -1187,122 +1350,744 @@ export class LevelGenerator {
     updateBossDefeat(delta) {}
 
     createDecorations(trackLength) {
-        // 1. Layered low-poly rolling hills along both flanks to eliminate flat-plane appearance
+        // 1. Multi-tier rolling hills and distant terrain
         this.createRollingHills(trackLength);
 
-        // 2. Progressive scenery distribution by zones along the track
-        for (let z = 8; z < trackLength - 8; z += 7) {
+        // 2. Progressive environmental distribution across the 3 distinct zones with gradual blending
+        for (let z = 6; z < trackLength - 6; z += 5.5) {
             const progress = z / trackLength; // 0.0 to 1.0
+            const cx = this.getPathCenterX(z);
+            const angle = this.getPathTangentAngle ? this.getPathTangentAngle(z) : 0;
+            const cosA = Math.cos(angle);
+            const sinA = Math.sin(angle);
 
-            // Both left and right side scenery
+            // Both left and right side scenery positioned relative to the curved road normal
             for (let side of [-1, 1]) {
                 const rand = Math.random();
-                const jitterZ = -z + (Math.random() - 0.5) * 4;
+                const jitterDist = (Math.random() - 0.5) * 2.0;
 
-                // Zone 1: Meadow Parkway (Start to 35%)
+                // ========================================================
+                // ZONE 1: Ancient Forest (Start to 35% / z: 0 - 70m)
+                // Dense trees, bushes, roots, fallen logs, sunbeams, mist
+                // ========================================================
                 if (progress < 0.35) {
-                    // Immediate verge: roadside flags, ruined temple walls & flowering bushes hugging curb
-                    if (rand < 0.22) {
-                        const flagX = side * 4.3;
-                        const flagCol = side > 0 ? 0x0284c7 : 0xf43f5e;
-                        this.createRoadsideFlag(flagX, jitterZ, flagCol);
-                    } else if (rand < 0.42) {
-                        const wallX = side * 4.35;
-                        this.createRuinedWall(wallX, jitterZ, 3.8);
-                    } else if (rand < 0.65) {
-                        const bushX = side * (4.4 + Math.random() * 1.4);
+                    // Foreground verge: gnarled roots, mossy logs, ferns, roadside flora
+                    const vergeOffset = side * 4.25;
+                    const vx = cx + vergeOffset * cosA;
+                    const vz = -(z + jitterDist) - vergeOffset * sinA;
+
+                    if (rand < 0.28) {
+                        this.createTreeRoot(vx, -vz, side, angle);
+                    } else if (rand < 0.52) {
+                        this.createFallenLog(vx, -vz, 3.2 + Math.random() * 1.5, angle);
+                    } else if (rand < 0.76) {
+                        this.createFern(vx, -vz);
+                    } else {
                         const flowerCol = Math.random() > 0.5 ? 0xf43f5e : 0xfacc15;
-                        this.createBush(bushX, jitterZ, 0.7 + Math.random() * 0.4, flowerCol);
+                        this.createBush(vx, -vz, 0.7 + Math.random() * 0.4, flowerCol);
                     }
 
-                    // Mid verge: Lush round fluffy trees & boulders
-                    const treeX = side * (5.6 + Math.random() * 8);
-                    const treeScale = 0.85 + Math.random() * 0.5;
-                    const foliageCols = [0x22c55e, 0x16a34a, 0x15803d, 0x4ade80];
+                    // Midground forest: Ancient towering oak/canopy trees & mossy rocks
+                    const midOffset = side * (5.8 + Math.random() * 8.5);
+                    const mx = cx + midOffset * cosA;
+                    const mz = -(z + (Math.random() - 0.5) * 3) - midOffset * sinA;
+
+                    const foliageCols = [0x15803d, 0x166534, 0x14532d, 0x1e5a32];
                     const fCol = foliageCols[Math.floor(Math.random() * foliageCols.length)];
-                    this.createRoundTree(treeX, jitterZ, treeScale, fCol);
+                    this.createAncientForestTree(mx, -mz, 0.9 + Math.random() * 0.5, fCol);
 
                     if (Math.random() > 0.35) {
-                        const rockX = side * (4.6 + Math.random() * 5);
-                        this.createRock(rockX, jitterZ + 2, 0.5 + Math.random() * 0.6);
+                        const rockOffset = side * (4.8 + Math.random() * 5.0);
+                        const rx = cx + rockOffset * cosA;
+                        const rz = -(z + 2.0) - rockOffset * sinA;
+                        this.createRock(rx, -rz, 0.6 + Math.random() * 0.7);
                     }
                 }
-                // Zone 2: Palm Oasis & Valley (35% to 72%)
-                else if (progress < 0.72) {
-                    // Verge: arcade crystals, ancient ruin walls & warm boulders right beside curb
-                    if (rand < 0.25) {
-                        const crysX = side * (4.5 + Math.random() * 1.8);
-                        this.createArcadeCrystal(crysX, jitterZ);
-                    } else if (rand < 0.45) {
-                        const wallX = side * 4.35;
-                        this.createRuinedWall(wallX, jitterZ, 4.2);
-                    } else if (rand < 0.7) {
-                        const bushX = side * (4.4 + Math.random() * 1.5);
-                        this.createBush(bushX, jitterZ, 0.8 + Math.random() * 0.3, 0xa855f7);
+                // ========================================================
+                // ZONE 2: Ancient Ruins (35% to 70% / z: 70 - 140m)
+                // Broken stone walls, fluted pillars, stone stairs, statues, chasm
+                // ========================================================
+                else if (progress < 0.70) {
+                    const vergeOffset = side * 4.35;
+                    const vx = cx + vergeOffset * cosA;
+                    const vz = -(z + jitterDist) - vergeOffset * sinA;
+
+                    // Exclude immediate bridge zone verges as bridge has its own parapet curbs
+                    const isBridgeSpan = (z >= 86 && z <= 108);
+
+                    if (!isBridgeSpan) {
+                        if (rand < 0.28) {
+                            // Ancient Guardian Statues standing vigil beside the ruins
+                            this.createGuardianStatue(vx, -vz, side, angle);
+                        } else if (rand < 0.52) {
+                            // Weathered stone balustrade / ruined wall
+                            this.createRuinedWall(vx, -vz, 4.0, angle);
+                        } else if (rand < 0.76) {
+                            // Broken fluted column (some broken at mid-height, some standing)
+                            const isBroken = Math.random() > 0.4;
+                            this.createRuinedPillar(vx, -vz, isBroken ? 2.2 : 4.8, isBroken, angle);
+                        } else {
+                            // Ancient stone stairs leading up into abandoned hillside shrines
+                            this.createRuinedStairs(vx, -vz, side, angle);
+                        }
                     }
 
-                    // Mid verge: Stylized arcade palms & scattered conifers
-                    const treeX = side * (5.6 + Math.random() * 8);
-                    if (Math.random() > 0.3) {
-                        this.createPalmTree(treeX, jitterZ, 0.9 + Math.random() * 0.4);
+                    // Midground ruins: Colonnades, ancient crumbling archways, desert boulders
+                    const midOffset = side * (5.8 + Math.random() * 9.0);
+                    const mx = cx + midOffset * cosA;
+                    const mz = -(z + (Math.random() - 0.5) * 3) - midOffset * sinA;
+
+                    if (Math.random() > 0.4) {
+                        this.createRuinedPillar(mx, -mz, 5.2, false, angle);
                     } else {
-                        this.createPineTree(treeX, jitterZ, 0.85 + Math.random() * 0.4);
+                        this.createPalmTree(mx, -mz, 0.9 + Math.random() * 0.4);
                     }
 
-                    const rockX = side * (4.6 + Math.random() * 5);
-                    this.createRock(rockX, jitterZ - 1.5, 0.6 + Math.random() * 0.7);
+                    const rockOffset = side * (4.8 + Math.random() * 5.5);
+                    const rx = cx + rockOffset * cosA;
+                    const rz = -(z - 1.5) - rockOffset * sinA;
+                    this.createRock(rx, -rz, 0.7 + Math.random() * 0.8);
                 }
-                // Zone 3: Colosseum & Arena Approach (72% to 100%)
+                // ========================================================
+                // ZONE 3: Magical Temple / Castle (70% to 100% / z: 140 - 200m)
+                // Dark basalt structures, glowing runes, grand colonnades, mystic pylons
+                // ========================================================
                 else {
-                    // Verge: Grand stone obelisks, ruined balustrades & triumphant flags
-                    if (rand < 0.3) {
-                        const pylonX = side * 4.4;
-                        this.createObelisk(pylonX, jitterZ, 0.9 + Math.random() * 0.3);
-                    } else if (rand < 0.5) {
-                        const wallX = side * 4.35;
-                        this.createRuinedWall(wallX, jitterZ, 4.0);
-                    } else if (rand < 0.7) {
-                        const flagX = side * 4.2;
-                        this.createRoadsideFlag(flagX, jitterZ, 0xfacc15);
+                    const vergeOffset = side * 4.45;
+                    const vx = cx + vergeOffset * cosA;
+                    const vz = -(z + jitterDist) - vergeOffset * sinA;
+
+                    if (rand < 0.30) {
+                        // Grand fluted black basalt colonnade with gold capital and glowing base
+                        this.createTempleColonnade(vx, -vz, 6.2, angle);
+                    } else if (rand < 0.55) {
+                        // Monumental temple obelisk pylon with hovering cyan mana crystal
+                        this.createTemplePylon(vx, -vz, angle);
+                    } else if (rand < 0.78) {
+                        // Carved mana plinth with hovering glowing rune orb
+                        this.createManaPlinth(vx, -vz, angle);
+                    } else {
+                        // Mystic flame brazier with cyan/violet mana fire
+                        this.createMysticBrazier(vx, -vz, angle);
                     }
 
-                    // Mid verge: Dense alpine evergreen pines framing the approach
-                    const pineX = side * (5.4 + Math.random() * 8);
-                    this.createPineTree(pineX, jitterZ, 1.0 + Math.random() * 0.6);
+                    // Midground temple architecture: Towering pillars, bastions, and alpine evergreens
+                    const midOffset = side * (5.6 + Math.random() * 8.5);
+                    const mx = cx + midOffset * cosA;
+                    const mz = -(z + (Math.random() - 0.5) * 3) - midOffset * sinA;
 
-                    if (Math.random() > 0.3) {
-                        const rockX = side * (4.6 + Math.random() * 5);
-                        this.createRock(rockX, jitterZ + 1.2, 0.7 + Math.random() * 0.7);
+                    if (Math.random() > 0.4) {
+                        this.createTempleColonnade(mx, -mz, 7.8, angle);
+                    } else {
+                        this.createPineTree(mx, -mz, 1.1 + Math.random() * 0.5);
                     }
+
+                    const rockOffset = side * (4.8 + Math.random() * 5.0);
+                    const rx = cx + rockOffset * cosA;
+                    const rz = -(z + 1.2) - rockOffset * sinA;
+                    this.createRock(rx, -rz, 0.8 + Math.random() * 0.7);
                 }
+            }
+
+            // Overhead environmental architecture spanning the path:
+            if (progress < 0.35 && z % 22 < 5.5) {
+                // Zone 1: Overhead curved leafy canopy branch arch & sunbeam shaft
+                this.createCanopyBranchArch(cx, z, angle);
+                this.createSunbeamShaft(cx, z, angle);
+            } else if (progress >= 0.70 && z % 20 < 5.5 && z < trackLength - 16) {
+                // Zone 3: Monumental vaulted ribbed stone temple arch overhead with glowing runes
+                this.createTempleVaultArch(cx, z, angle);
             }
         }
 
-        // 3. Dual-layer mountain ranges along the horizon
+        // 3. Flanking canyon rock cliff walls creating trail enclosure and environmental depth
+        this.createCanyonWalls(trackLength);
+
+        // 4. Distant majestic mountain ranges along the horizon
         this.createMountains(trackLength);
 
-        // 4. Distant colorful hot air balloons adding arcade life to the horizon
+        // 5. Distant colorful hot air balloons adding arcade life to the horizon
         this.createHotAirBalloons(trackLength);
 
-        // 5. Stylized low-poly 3D clouds in the bright sky
+        // 6. Stylized low-poly 3D clouds in the sky
         this.createClouds(trackLength);
     }
 
+    // ========================================================
+    // ZONE 1: ANCIENT FOREST HELPERS
+    // ========================================================
+    createAncientForestTree(x, z, scale = 1, foliageColor = 0x166534) {
+        const group = new THREE.Group();
+
+        // Thick gnarled wooden trunk with buttressed roots
+        const trunkGeo = new THREE.CylinderGeometry(0.25 * scale, 0.42 * scale, 3.2 * scale, 6);
+        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x482f1b, roughness: 0.9 });
+        const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+        trunk.position.y = 1.6 * scale;
+        trunk.castShadow = true;
+        group.add(trunk);
+
+        // Low-poly multi-tier dense leafy canopy
+        const canopyMat = new THREE.MeshStandardMaterial({
+            color: foliageColor,
+            flatShading: true,
+            roughness: 0.65
+        });
+
+        const mainCanopy = new THREE.Mesh(new THREE.DodecahedronGeometry(1.5 * scale, 1), canopyMat);
+        mainCanopy.position.y = 3.6 * scale;
+        mainCanopy.castShadow = true;
+        group.add(mainCanopy);
+
+        const sub1 = new THREE.Mesh(new THREE.DodecahedronGeometry(1.1 * scale, 1), canopyMat);
+        sub1.position.set(0.6 * scale, 4.0 * scale, 0.3 * scale);
+        sub1.castShadow = true;
+        group.add(sub1);
+
+        const highlightMat = new THREE.MeshStandardMaterial({
+            color: 0x22c55e,
+            flatShading: true,
+            roughness: 0.6
+        });
+        const topCanopy = new THREE.Mesh(new THREE.DodecahedronGeometry(0.95 * scale, 1), highlightMat);
+        topCanopy.position.set(-0.35 * scale, 4.6 * scale, -0.2 * scale);
+        topCanopy.castShadow = true;
+        group.add(topCanopy);
+
+        group.position.set(x, 0, z);
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+    }
+
+    createTreeRoot(x, z, side, angle = 0) {
+        const group = new THREE.Group();
+        const rootMat = new THREE.MeshStandardMaterial({ color: 0x3d2716, roughness: 0.95 });
+
+        // Arching gnarled root cylinder emerging from soil and curling along curb
+        const rootGeo = new THREE.CylinderGeometry(0.12, 0.22, 2.4, 6);
+        const root = new THREE.Mesh(rootGeo, rootMat);
+        root.rotation.z = side * 0.45;
+        root.rotation.x = Math.PI / 2 + 0.2;
+        root.position.set(0, 0.22, 0);
+        root.castShadow = true;
+        group.add(root);
+
+        // Moss tuft on root
+        const mossMat = new THREE.MeshStandardMaterial({ color: 0x2e6b3e, roughness: 0.9 });
+        const moss = new THREE.Mesh(new THREE.DodecahedronGeometry(0.2, 0), mossMat);
+        moss.position.set(side * 0.15, 0.32, 0.2);
+        group.add(moss);
+
+        group.position.set(x, 0, z);
+        group.rotation.y = angle;
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+    }
+
+    createFallenLog(x, z, length = 3.5, angle = 0) {
+        const group = new THREE.Group();
+        const logMat = new THREE.MeshStandardMaterial({ color: 0x422d1b, roughness: 0.92 });
+        const mossMat = new THREE.MeshStandardMaterial({ color: 0x367a42, roughness: 0.85 });
+
+        const logGeo = new THREE.CylinderGeometry(0.22, 0.28, length, 6);
+        const log = new THREE.Mesh(logGeo, logMat);
+        log.rotation.x = Math.PI / 2 + 0.08;
+        log.rotation.z = (Math.random() - 0.5) * 0.25;
+        log.position.y = 0.22;
+        log.castShadow = true;
+        group.add(log);
+
+        // Moss patches on log
+        for (let i = 0; i < 3; i++) {
+            const m = new THREE.Mesh(new THREE.DodecahedronGeometry(0.18, 0), mossMat);
+            m.position.set((Math.random() - 0.5) * 0.2, 0.38, (i - 1) * (length * 0.28));
+            group.add(m);
+        }
+
+        group.position.set(x, 0, z);
+        group.rotation.y = angle;
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+    }
+
+    createFern(x, z) {
+        const group = new THREE.Group();
+        const fernMat = new THREE.MeshStandardMaterial({
+            color: 0x16a34a,
+            flatShading: true,
+            roughness: 0.7,
+            side: THREE.DoubleSide
+        });
+
+        // 6 radiating fern fronds
+        for (let i = 0; i < 6; i++) {
+            const frondGeo = new THREE.ConeGeometry(0.24, 0.95, 3);
+            const frond = new THREE.Mesh(frondGeo, fernMat);
+            frond.rotation.y = (i / 6) * Math.PI * 2;
+            frond.rotation.z = 0.75;
+            frond.position.y = 0.28;
+            group.add(frond);
+        }
+
+        group.position.set(x, 0, z);
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+    }
+
+    createCanopyBranchArch(cx, z, angle = 0) {
+        const group = new THREE.Group();
+        const woodMat = new THREE.MeshStandardMaterial({ color: 0x482f1b, roughness: 0.9 });
+        const leafMat = new THREE.MeshStandardMaterial({ color: 0x15803d, flatShading: true, roughness: 0.7 });
+        const vineMat = new THREE.MeshStandardMaterial({ color: 0x22c55e, roughness: 0.9 });
+
+        // Arching natural bough spanning high overhead at y = 5.8m (safe above player jump)
+        const archGeo = new THREE.TorusGeometry(5.2, 0.32, 6, 12, Math.PI);
+        const arch = new THREE.Mesh(archGeo, woodMat);
+        arch.position.set(0, 3.8, 0);
+        arch.castShadow = true;
+        group.add(arch);
+
+        // Clusters of leaves and hanging vines
+        for (let i = 0; i < 5; i++) {
+            const leaf = new THREE.Mesh(new THREE.DodecahedronGeometry(0.8, 0), leafMat);
+            const a = (i / 4) * Math.PI;
+            leaf.position.set(Math.cos(a) * 5.0, 3.8 + Math.sin(a) * 4.8, (Math.random() - 0.5) * 0.8);
+            group.add(leaf);
+
+            // Hanging dangling vine
+            const vine = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.02, 1.2, 4), vineMat);
+            vine.position.set(Math.cos(a) * 4.6, 3.8 + Math.sin(a) * 4.0 - 0.6, 0);
+            group.add(vine);
+        }
+
+        group.position.set(cx, 0, -z);
+        group.rotation.y = angle;
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+    }
+
+    createSunbeamShaft(cx, z, angle = 0) {
+        const group = new THREE.Group();
+        // Warm translucent sunlight shaft filtering through forest canopy
+        const beamGeo = new THREE.PlaneGeometry(3.5, 14);
+        const beamMat = new THREE.MeshBasicMaterial({
+            color: 0xfff3c4,
+            transparent: true,
+            opacity: 0.12,
+            blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide,
+            depthWrite: false
+        });
+        const beam = new THREE.Mesh(beamGeo, beamMat);
+        beam.rotation.z = -0.35; // Diagonal sunbeam angle
+        beam.rotation.x = 0.2;
+        beam.position.set(-1.8, 6.5, 0);
+        group.add(beam);
+
+        group.position.set(cx, 0, -z);
+        group.rotation.y = angle;
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+
+        this.animatedProps.push({
+            type: 'sunbeam',
+            mesh: beam,
+            phase: Math.random() * Math.PI * 2
+        });
+    }
+
+    // ========================================================
+    // ZONE 2: ANCIENT RUINS HELPERS
+    // ========================================================
+    createRuinedPillar(x, z, height = 4.8, isBroken = false, angle = 0) {
+        const group = new THREE.Group();
+        const stoneMat = new THREE.MeshStandardMaterial({ color: 0x9e8a6c, roughness: 0.84, metalness: 0.12 });
+        const crackedMat = new THREE.MeshStandardMaterial({ color: 0x6e5b46, roughness: 0.9 });
+
+        // Tiered square base plinth
+        const baseGeo = new THREE.BoxGeometry(0.9, 0.45, 0.9);
+        const base = new THREE.Mesh(baseGeo, stoneMat);
+        base.position.y = 0.225;
+        base.castShadow = true;
+        group.add(base);
+
+        // Fluted column shaft
+        const colGeo = new THREE.CylinderGeometry(0.34, 0.40, height, 10);
+        const col = new THREE.Mesh(colGeo, stoneMat);
+        col.position.y = 0.45 + height / 2;
+        col.castShadow = true;
+        group.add(col);
+
+        if (!isBroken) {
+            // Intact carved stone capital
+            const capGeo = new THREE.BoxGeometry(0.95, 0.4, 0.95);
+            const cap = new THREE.Mesh(capGeo, stoneMat);
+            cap.position.y = 0.45 + height + 0.2;
+            cap.castShadow = true;
+            group.add(cap);
+        } else {
+            // Shattered top and fallen stone drum chunks on ground
+            for (let i = 0; i < 3; i++) {
+                const chunk = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.35, 0.5, 6), crackedMat);
+                chunk.rotation.z = Math.PI / 2 + (Math.random() - 0.5) * 0.4;
+                chunk.position.set((Math.random() - 0.5) * 0.8 + 0.6, 0.25, (Math.random() - 0.5) * 0.8);
+                chunk.castShadow = true;
+                group.add(chunk);
+            }
+        }
+
+        group.position.set(x, 0, z);
+        group.rotation.y = angle;
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+    }
+
+    createGuardianStatue(x, z, side, angle = 0) {
+        const group = new THREE.Group();
+        const stoneMat = new THREE.MeshStandardMaterial({ color: 0x827056, roughness: 0.85, metalness: 0.15 });
+        const goldTrim = new THREE.MeshStandardMaterial({ color: 0xd4af37, roughness: 0.35, metalness: 0.7 });
+
+        // Stepped carved statue pedestal
+        const pedGeo = new THREE.BoxGeometry(1.2, 0.8, 1.2);
+        const ped = new THREE.Mesh(pedGeo, stoneMat);
+        ped.position.y = 0.4;
+        ped.castShadow = true;
+        group.add(ped);
+
+        // Weathered armored guardian torso
+        const bodyGeo = new THREE.BoxGeometry(0.65, 1.4, 0.45);
+        const body = new THREE.Mesh(bodyGeo, stoneMat);
+        body.position.y = 1.5;
+        body.castShadow = true;
+        group.add(body);
+
+        // Golden breastplate relief
+        const crest = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.08, 8), goldTrim);
+        crest.rotation.x = Math.PI / 2;
+        crest.position.set(0, 1.6, 0.25);
+        group.add(crest);
+
+        // Helmet head
+        const head = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.52, 0.42), stoneMat);
+        head.position.y = 2.45;
+        head.castShadow = true;
+        group.add(head);
+
+        // Stone spear held upright
+        const spear = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 3.8, 6), stoneMat);
+        spear.position.set(side * 0.45, 2.0, 0.15);
+        spear.castShadow = true;
+        group.add(spear);
+
+        const spearTip = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.5, 4), goldTrim);
+        spearTip.position.set(side * 0.45, 4.0, 0.15);
+        group.add(spearTip);
+
+        group.position.set(x, 0, z);
+        group.rotation.y = angle + (side > 0 ? -0.25 : 0.25);
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+    }
+
+    createRuinedStairs(x, z, side, angle = 0) {
+        const group = new THREE.Group();
+        const stoneMat = new THREE.MeshStandardMaterial({ color: 0x948268, roughness: 0.88 });
+
+        // 3 Tiered stone steps leading outward into the hillside
+        for (let i = 0; i < 3; i++) {
+            const stepGeo = new THREE.BoxGeometry(1.6, 0.28, 1.1 + i * 0.6);
+            const step = new THREE.Mesh(stepGeo, stoneMat);
+            step.position.set(side * (i * 0.35), 0.14 + i * 0.26, 0);
+            step.castShadow = true;
+            step.receiveShadow = true;
+            group.add(step);
+        }
+
+        // Small ruined altar block at top of stairs
+        const altar = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.8, 0.9), stoneMat);
+        altar.position.set(side * 1.3, 0.9, 0);
+        altar.castShadow = true;
+        group.add(altar);
+
+        group.position.set(x, 0, z);
+        group.rotation.y = angle;
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+    }
+
+    // ========================================================
+    // ZONE 3: MAGICAL TEMPLE & CITADEL HELPERS
+    // ========================================================
+    createTempleColonnade(x, z, height = 6.2, angle = 0) {
+        const group = new THREE.Group();
+        const basaltMat = new THREE.MeshStandardMaterial({ color: 0x1b1f2e, roughness: 0.5, metalness: 0.7 });
+        const goldMat = new THREE.MeshStandardMaterial({ color: 0xffd700, roughness: 0.25, metalness: 0.9 });
+        const runeMat = new THREE.MeshStandardMaterial({
+            color: 0x00f0ff,
+            emissive: 0x00d8f6,
+            emissiveIntensity: 0.85
+        });
+
+        // Stepped basalt base with glowing rune band
+        const baseGeo = new THREE.BoxGeometry(1.1, 0.5, 1.1);
+        const base = new THREE.Mesh(baseGeo, basaltMat);
+        base.position.y = 0.25;
+        base.castShadow = true;
+        group.add(base);
+
+        const runeBand = new THREE.Mesh(new THREE.BoxGeometry(1.12, 0.08, 1.12), runeMat);
+        runeBand.position.y = 0.45;
+        group.add(runeBand);
+
+        // Fluted basalt column shaft
+        const shaftGeo = new THREE.CylinderGeometry(0.38, 0.45, height, 12);
+        const shaft = new THREE.Mesh(shaftGeo, basaltMat);
+        shaft.position.y = 0.5 + height / 2;
+        shaft.castShadow = true;
+        group.add(shaft);
+
+        // Ornate golden capital
+        const capGeo = new THREE.BoxGeometry(1.2, 0.45, 1.2);
+        const cap = new THREE.Mesh(capGeo, goldMat);
+        cap.position.y = 0.5 + height + 0.225;
+        cap.castShadow = true;
+        group.add(cap);
+
+        group.position.set(x, 0, z);
+        group.rotation.y = angle;
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+    }
+
+    createTemplePylon(x, z, angle = 0) {
+        const group = new THREE.Group();
+        const basaltMat = new THREE.MeshStandardMaterial({ color: 0x161824, roughness: 0.6, metalness: 0.6 });
+        const manaMat = new THREE.MeshStandardMaterial({
+            color: 0x00f0ff,
+            emissive: 0x00d0f0,
+            emissiveIntensity: 1.0,
+            roughness: 0.15,
+            metalness: 0.8
+        });
+
+        // 7.5m Monumental Obelisk
+        const pylonGeo = new THREE.CylinderGeometry(0.3, 0.65, 7.5, 4);
+        const pylon = new THREE.Mesh(pylonGeo, basaltMat);
+        pylon.position.y = 3.75;
+        pylon.rotation.y = Math.PI / 4;
+        pylon.castShadow = true;
+        group.add(pylon);
+
+        // Floating hovering mana crystal polyhedron atop the pylon
+        const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.45, 0), manaMat);
+        crystal.position.y = 8.1;
+        group.add(crystal);
+
+        // Mana ring orbit
+        const ring = new THREE.Mesh(
+            new THREE.TorusGeometry(0.65, 0.04, 6, 16),
+            new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.9 })
+        );
+        ring.position.y = 8.1;
+        ring.rotation.x = Math.PI / 3;
+        group.add(ring);
+
+        group.position.set(x, 0, z);
+        group.rotation.y = angle;
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+
+        this.animatedProps.push({
+            type: 'manaOrb',
+            mesh: crystal,
+            baseY: 8.1,
+            phase: Math.random() * Math.PI * 2
+        });
+    }
+
+    createManaPlinth(x, z, angle = 0) {
+        const group = new THREE.Group();
+        const stoneMat = new THREE.MeshStandardMaterial({ color: 0x222638, roughness: 0.7, metalness: 0.4 });
+        const manaOrbMat = new THREE.MeshStandardMaterial({
+            color: 0x00f0ff,
+            emissive: 0x00e5ff,
+            emissiveIntensity: 1.1,
+            roughness: 0.1
+        });
+
+        // Pedestal base
+        const base = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 1.2, 8), stoneMat);
+        base.position.y = 0.6;
+        base.castShadow = true;
+        group.add(base);
+
+        // Hovering glowing mana orb
+        const orb = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 12), manaOrbMat);
+        orb.position.y = 1.7;
+        group.add(orb);
+
+        // Floating rune rings
+        const ringMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: 0.5, side: THREE.DoubleSide });
+        const ring = new THREE.Mesh(new THREE.RingGeometry(0.32, 0.38, 16), ringMat);
+        ring.position.y = 1.7;
+        ring.rotation.x = -Math.PI / 2;
+        group.add(ring);
+
+        group.position.set(x, 0, z);
+        group.rotation.y = angle;
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+
+        this.animatedProps.push({
+            type: 'manaOrb',
+            mesh: orb,
+            baseY: 1.7,
+            phase: Math.random() * Math.PI * 2
+        });
+    }
+
+    createMysticBrazier(x, z, angle = 0) {
+        const group = new THREE.Group();
+        const ironMat = new THREE.MeshStandardMaterial({ color: 0x141620, roughness: 0.5, metalness: 0.85 });
+        const flameMat = new THREE.MeshStandardMaterial({
+            color: 0x00f0ff,
+            emissive: 0x0099ff,
+            emissiveIntensity: 1.5,
+            roughness: 0.2
+        });
+
+        const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.38, 1.3, 8), ironMat);
+        ped.position.y = 0.65;
+        ped.castShadow = true;
+        group.add(ped);
+
+        const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.25, 0.35, 8), ironMat);
+        bowl.position.y = 1.45;
+        group.add(bowl);
+
+        // Mystic flame cone
+        const flame = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.8, 6), flameMat);
+        flame.position.y = 1.9;
+        group.add(flame);
+
+        group.position.set(x, 0, z);
+        group.rotation.y = angle;
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+
+        this.animatedProps.push({
+            type: 'flame',
+            mesh: flame,
+            phase: Math.random() * Math.PI * 2
+        });
+    }
+
+    createTempleVaultArch(cx, z, angle = 0) {
+        const group = new THREE.Group();
+        const basaltMat = new THREE.MeshStandardMaterial({ color: 0x1a1e2b, roughness: 0.6, metalness: 0.5 });
+        const goldMat = new THREE.MeshStandardMaterial({ color: 0xffd700, roughness: 0.3, metalness: 0.85 });
+        const runeGlow = new THREE.MeshStandardMaterial({ color: 0x00f0ff, emissive: 0x00f0ff, emissiveIntensity: 0.9 });
+
+        // Monumental vaulted ribbed arch spanning across the road at height 7.5m
+        const archWidth = 10.2;
+        const archHeight = 7.5;
+
+        // Left & right pylon columns
+        const leftCol = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.8, archHeight, 10), basaltMat);
+        leftCol.position.set(-archWidth / 2, archHeight / 2, 0);
+        leftCol.castShadow = true;
+        group.add(leftCol);
+
+        const rightCol = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.8, archHeight, 10), basaltMat);
+        rightCol.position.set(archWidth / 2, archHeight / 2, 0);
+        rightCol.castShadow = true;
+        group.add(rightCol);
+
+        // Overhead heavy lintel beam
+        const beamGeo = new THREE.BoxGeometry(archWidth + 1.6, 1.1, 1.4);
+        const beam = new THREE.Mesh(beamGeo, basaltMat);
+        beam.position.set(0, archHeight + 0.55, 0);
+        beam.castShadow = true;
+        group.add(beam);
+
+        // Glowing carved rune frieze across beam
+        const frieze = new THREE.Mesh(new THREE.PlaneGeometry(archWidth * 0.75, 0.35), runeGlow);
+        frieze.position.set(0, archHeight + 0.55, 0.72);
+        group.add(frieze);
+
+        // Golden center keystone crest
+        const crest = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.3, 1.5), goldMat);
+        crest.position.set(0, archHeight + 0.6, 0);
+        group.add(crest);
+
+        group.position.set(cx, 0, -z);
+        group.rotation.y = angle;
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+    }
+
+    // ========================================================
+    // SURROUNDINGS & DEPTH (Canyon walls, hills, mountains)
+    // ========================================================
+    createCanyonWalls(trackLength) {
+        // Create broken rocky cliff canyon terraces along both flanks
+        const cliffColors = [0x504234, 0x42362b, 0x362c23];
+        for (let z = 12; z < trackLength + 40; z += 24) {
+            for (let side of [-1, 1]) {
+                const group = new THREE.Group();
+                const cliffX = side * (16 + Math.random() * 5);
+                const cliffZ = -z + (Math.random() - 0.5) * 6;
+                const height = 4.5 + Math.random() * 3.5;
+                const width = 12 + Math.random() * 8;
+
+                const cliffGeo = new THREE.BoxGeometry(width, height, 8);
+                const cliffMat = new THREE.MeshStandardMaterial({
+                    color: cliffColors[Math.floor(Math.random() * cliffColors.length)],
+                    roughness: 0.92,
+                    flatShading: true
+                });
+                const cliff = new THREE.Mesh(cliffGeo, cliffMat);
+                cliff.position.y = height / 2 - 0.2;
+                cliff.rotation.y = (Math.random() - 0.5) * 0.35;
+                cliff.receiveShadow = true;
+                group.add(cliff);
+
+                group.position.set(cliffX, 0, cliffZ);
+                group.userData.dynamic = true;
+                this.scene.add(group);
+                this.meshes.push(group);
+            }
+        }
+    }
+
     createRollingHills(trackLength) {
-        // Create low-poly rolling mounds along both sides
-        const hillColors = [0x32834b, 0x3d9959, 0x2d7343, 0x45a863];
+        const hillColors = [0x285934, 0x327341, 0x224c2c];
         for (let z = 0; z < trackLength + 60; z += 18) {
             for (let side of [-1, 1]) {
-                const hillX = side * (22 + Math.random() * 18);
+                const hillX = side * (26 + Math.random() * 16);
                 const hillZ = -z + (Math.random() - 0.5) * 8;
-                const radius = 9 + Math.random() * 8;
-                const height = 1.6 + Math.random() * 2.2;
+                const radius = 10 + Math.random() * 8;
+                const height = 2.2 + Math.random() * 2.5;
 
                 const hillGeo = new THREE.CylinderGeometry(radius * 0.3, radius, height, 7);
                 const hillMat = new THREE.MeshStandardMaterial({
                     color: hillColors[Math.floor(Math.random() * hillColors.length)],
                     flatShading: true,
-                    roughness: 0.9
+                    roughness: 0.92
                 });
                 const hill = new THREE.Mesh(hillGeo, hillMat);
                 hill.position.set(hillX, height * 0.45 - 0.05, hillZ);
@@ -1315,54 +2100,9 @@ export class LevelGenerator {
         }
     }
 
-    createRoundTree(x, z, scale = 1, foliageColor = 0x22c55e) {
-        const group = new THREE.Group();
-
-        // Wooden Trunk
-        const trunkGeo = new THREE.CylinderGeometry(0.18 * scale, 0.28 * scale, 2.2 * scale, 6);
-        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5c3a21, roughness: 0.8 });
-        const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-        trunk.position.y = 1.1 * scale;
-        trunk.castShadow = true;
-        group.add(trunk);
-
-        // Multi-part fluffy canopy (3 overlapping low-poly spheres)
-        const canopyMat = new THREE.MeshStandardMaterial({
-            color: foliageColor,
-            flatShading: true,
-            roughness: 0.6
-        });
-        const mainCanopy = new THREE.Mesh(new THREE.DodecahedronGeometry(1.25 * scale, 1), canopyMat);
-        mainCanopy.position.y = 2.4 * scale;
-        mainCanopy.castShadow = true;
-        group.add(mainCanopy);
-
-        const subCanopy1 = new THREE.Mesh(new THREE.DodecahedronGeometry(0.9 * scale, 1), canopyMat);
-        subCanopy1.position.set(0.45 * scale, 2.7 * scale, 0.25 * scale);
-        subCanopy1.castShadow = true;
-        group.add(subCanopy1);
-
-        const highlightMat = new THREE.MeshStandardMaterial({
-            color: 0x4ade80,
-            flatShading: true,
-            roughness: 0.6
-        });
-        const topCanopy = new THREE.Mesh(new THREE.DodecahedronGeometry(0.8 * scale, 1), highlightMat);
-        topCanopy.position.set(-0.25 * scale, 3.2 * scale, -0.15 * scale);
-        topCanopy.castShadow = true;
-        group.add(topCanopy);
-
-        group.position.set(x, 0, z);
-        group.userData.dynamic = true;
-        this.scene.add(group);
-        this.meshes.push(group);
-    }
-
     createPalmTree(x, z, scale = 1) {
         const group = new THREE.Group();
-
-        // Curved segmented trunk
-        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x785338, roughness: 0.75 });
+        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6e4e34, roughness: 0.8 });
         const seg1 = new THREE.Mesh(new THREE.CylinderGeometry(0.18 * scale, 0.26 * scale, 1.5 * scale, 6), trunkMat);
         seg1.position.set(0, 0.75 * scale, 0);
         seg1.rotation.z = 0.08;
@@ -1375,12 +2115,7 @@ export class LevelGenerator {
         seg2.castShadow = true;
         group.add(seg2);
 
-        // 5 radiating palm fronds curving downwards
-        const frondMat = new THREE.MeshStandardMaterial({
-            color: 0x16a34a,
-            flatShading: true,
-            roughness: 0.55
-        });
+        const frondMat = new THREE.MeshStandardMaterial({ color: 0x16a34a, flatShading: true, roughness: 0.55 });
         const frondGeo = new THREE.ConeGeometry(0.55 * scale, 2.0 * scale, 4);
 
         for (let i = 0; i < 5; i++) {
@@ -1388,22 +2123,9 @@ export class LevelGenerator {
             const frond = new THREE.Mesh(frondGeo, frondMat);
             frond.position.set(0.25 * scale, 3.0 * scale, 0);
             frond.rotation.y = angle;
-            frond.rotation.z = 1.15; // droop outward
+            frond.rotation.z = 1.15;
             frond.castShadow = true;
             group.add(frond);
-        }
-
-        // Coconuts
-        const cocoMat = new THREE.MeshStandardMaterial({ color: 0xa16207, roughness: 0.7 });
-        for (let i = 0; i < 3; i++) {
-            const angle = (i / 3) * Math.PI * 2;
-            const coco = new THREE.Mesh(new THREE.SphereGeometry(0.14 * scale, 6, 6), cocoMat);
-            coco.position.set(
-                0.25 * scale + Math.cos(angle) * 0.2 * scale,
-                2.8 * scale,
-                Math.sin(angle) * 0.2 * scale
-            );
-            group.add(coco);
         }
 
         group.position.set(x, 0, z);
@@ -1414,8 +2136,6 @@ export class LevelGenerator {
 
     createPineTree(x, z, scale = 1) {
         const group = new THREE.Group();
-
-        // Brown trunk
         const trunkGeo = new THREE.CylinderGeometry(0.14 * scale, 0.22 * scale, 1.6 * scale, 6);
         const trunkMat = new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.8 });
         const trunk = new THREE.Mesh(trunkGeo, trunkMat);
@@ -1423,7 +2143,6 @@ export class LevelGenerator {
         trunk.castShadow = true;
         group.add(trunk);
 
-        // 3 stacked tiered cones
         const coneColors = [0x14532d, 0x166534, 0x15803d];
         for (let i = 0; i < 3; i++) {
             const radius = (1.25 - i * 0.28) * scale;
@@ -1448,12 +2167,7 @@ export class LevelGenerator {
 
     createBush(x, z, scale = 1, flowerColor = 0xf43f5e) {
         const group = new THREE.Group();
-
-        const bushMat = new THREE.MeshStandardMaterial({
-            color: 0x16a34a,
-            flatShading: true,
-            roughness: 0.7
-        });
+        const bushMat = new THREE.MeshStandardMaterial({ color: 0x16a34a, flatShading: true, roughness: 0.7 });
         const mainBush = new THREE.Mesh(new THREE.DodecahedronGeometry(0.7 * scale, 1), bushMat);
         mainBush.position.y = 0.45 * scale;
         mainBush.castShadow = true;
@@ -1464,21 +2178,11 @@ export class LevelGenerator {
         subBush.castShadow = true;
         group.add(subBush);
 
-        // Blossom accents
-        const flMat = new THREE.MeshStandardMaterial({
-            color: flowerColor,
-            emissive: flowerColor,
-            emissiveIntensity: 0.4,
-            roughness: 0.4
-        });
+        const flMat = new THREE.MeshStandardMaterial({ color: flowerColor, emissive: flowerColor, emissiveIntensity: 0.4 });
         for (let i = 0; i < 3; i++) {
             const angle = (i / 3) * Math.PI * 2;
             const blossom = new THREE.Mesh(new THREE.OctahedronGeometry(0.12 * scale, 0), flMat);
-            blossom.position.set(
-                Math.cos(angle) * 0.4 * scale,
-                0.8 * scale,
-                Math.sin(angle) * 0.4 * scale
-            );
+            blossom.position.set(Math.cos(angle) * 0.4 * scale, 0.8 * scale, Math.sin(angle) * 0.4 * scale);
             group.add(blossom);
         }
 
@@ -1490,11 +2194,11 @@ export class LevelGenerator {
 
     createRock(x, z, scale = 1) {
         const rockGeo = new THREE.DodecahedronGeometry(scale, 0);
-        const rockColors = [0x64748b, 0x475569, 0x94a3b8];
+        const rockColors = [0x64748b, 0x544738, 0x7a6952];
         const rockMat = new THREE.MeshStandardMaterial({
             color: rockColors[Math.floor(Math.random() * rockColors.length)],
             flatShading: true,
-            roughness: 0.85
+            roughness: 0.88
         });
         const rock = new THREE.Mesh(rockGeo, rockMat);
         rock.position.set(x, scale * 0.45, z);
@@ -1506,12 +2210,11 @@ export class LevelGenerator {
         this.meshes.push(rock);
     }
 
-    createRuinedWall(x, z, length = 4.0) {
+    createRuinedWall(x, z, length = 4.0, angle = 0) {
         const group = new THREE.Group();
         const stoneMat = new THREE.MeshStandardMaterial({ color: 0x7a654d, roughness: 0.85, metalness: 0.1 });
         const trimMat = new THREE.MeshStandardMaterial({ color: 0x5a4836, roughness: 0.9 });
 
-        // Low ancient stone balustrade / wall
         const wallGeo = new THREE.BoxGeometry(0.32, 0.7, length);
         const wall = new THREE.Mesh(wallGeo, stoneMat);
         wall.position.y = 0.35;
@@ -1519,14 +2222,12 @@ export class LevelGenerator {
         wall.receiveShadow = true;
         group.add(wall);
 
-        // Weathered coping slab on top
         const capGeo = new THREE.BoxGeometry(0.42, 0.12, length + 0.15);
         const cap = new THREE.Mesh(capGeo, trimMat);
         cap.position.y = 0.76;
         cap.castShadow = true;
         group.add(cap);
 
-        // Flanking pillar posts
         const postGeo = new THREE.BoxGeometry(0.48, 0.9, 0.48);
         const p1 = new THREE.Mesh(postGeo, stoneMat);
         p1.position.set(0, 0.45, -length / 2);
@@ -1539,6 +2240,7 @@ export class LevelGenerator {
         group.add(p2);
 
         group.position.set(x, 0, z);
+        group.rotation.y = angle;
         group.userData.dynamic = true;
         this.scene.add(group);
         this.meshes.push(group);
@@ -1546,8 +2248,6 @@ export class LevelGenerator {
 
     createRoadsideFlag(x, z, color = 0x0284c7) {
         const group = new THREE.Group();
-
-        // Flagpole
         const poleGeo = new THREE.CylinderGeometry(0.04, 0.05, 3.2, 5);
         const poleMat = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, metalness: 0.6, roughness: 0.3 });
         const pole = new THREE.Mesh(poleGeo, poleMat);
@@ -1555,7 +2255,6 @@ export class LevelGenerator {
         pole.castShadow = true;
         group.add(pole);
 
-        // Fluttering banner
         const flagGeo = new THREE.PlaneGeometry(0.85, 0.55);
         const flagMat = new THREE.MeshStandardMaterial({
             color: color,
@@ -1576,15 +2275,12 @@ export class LevelGenerator {
 
     createObelisk(x, z, scale = 1) {
         const group = new THREE.Group();
-
-        // Base pedestal
         const baseGeo = new THREE.BoxGeometry(0.8 * scale, 0.4 * scale, 0.8 * scale);
         const baseMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.7 });
         const base = new THREE.Mesh(baseGeo, baseMat);
         base.position.y = 0.2 * scale;
         group.add(base);
 
-        // Tapered stone pillar
         const pillarGeo = new THREE.CylinderGeometry(0.24 * scale, 0.38 * scale, 3.4 * scale, 4);
         const pillarMat = new THREE.MeshStandardMaterial({ color: 0x475569, flatShading: true, roughness: 0.7 });
         const pillar = new THREE.Mesh(pillarGeo, pillarMat);
@@ -1593,7 +2289,6 @@ export class LevelGenerator {
         pillar.castShadow = true;
         group.add(pillar);
 
-        // Glowing apex crystal
         const apexGeo = new THREE.OctahedronGeometry(0.22 * scale, 0);
         const apexMat = new THREE.MeshStandardMaterial({
             color: 0x00f0ff,
@@ -1620,26 +2315,18 @@ export class LevelGenerator {
 
         balloonConfigs.forEach(cfg => {
             const group = new THREE.Group();
-
-            // Main balloon envelope
             const balloonGeo = new THREE.SphereGeometry(cfg.scale, 12, 10);
             balloonGeo.scale(1, 1.35, 1);
-            const balloonMat = new THREE.MeshStandardMaterial({
-                color: cfg.col1,
-                roughness: 0.5,
-                flatShading: true
-            });
+            const balloonMat = new THREE.MeshStandardMaterial({ color: cfg.col1, roughness: 0.5, flatShading: true });
             const balloon = new THREE.Mesh(balloonGeo, balloonMat);
             group.add(balloon);
 
-            // Contrast equatorial stripe ring
             const stripeGeo = new THREE.TorusGeometry(cfg.scale * 1.01, 0.15 * cfg.scale, 6, 16);
             const stripeMat = new THREE.MeshStandardMaterial({ color: cfg.col2, roughness: 0.5 });
             const stripe = new THREE.Mesh(stripeGeo, stripeMat);
             stripe.rotation.x = Math.PI / 2;
             group.add(stripe);
 
-            // Passenger wicker basket
             const basketGeo = new THREE.BoxGeometry(0.7 * cfg.scale, 0.6 * cfg.scale, 0.7 * cfg.scale);
             const basketMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.9 });
             const basket = new THREE.Mesh(basketGeo, basketMat);
@@ -1653,33 +2340,7 @@ export class LevelGenerator {
         });
     }
 
-    createArcadeCrystal(x, z) {
-        const height = 1.6 + Math.random() * 1.8;
-        const radius = 0.4 + Math.random() * 0.3;
-        const crystalGeo = new THREE.OctahedronGeometry(radius, 0);
-        
-        const colors = [0x00f0ff, 0x00e676, 0xd500f9, 0xff007f];
-        const color = colors[Math.floor(Math.random() * colors.length)];
-        
-        const crystalMat = new THREE.MeshStandardMaterial({
-            color: color,
-            emissive: color,
-            emissiveIntensity: 0.75,
-            roughness: 0.1,
-            metalness: 0.9,
-            flatShading: true
-        });
-        const crystal = new THREE.Mesh(crystalGeo, crystalMat);
-        crystal.position.set(x, height * 0.6, z);
-        crystal.scale.set(1, height / radius, 1);
-        crystal.rotation.set(Math.random() * 0.3, Math.random() * Math.PI, Math.random() * 0.3);
-        crystal.userData.dynamic = true;
-        this.scene.add(crystal);
-        this.meshes.push(crystal);
-    }
-
     createMountains(trackLength) {
-        // Layer 1: Mid-distance rolling foothills
         const midColors = [0x255d40, 0x1f4b34, 0x2e6f4d];
         for (let i = 0; i < 16; i++) {
             const side = i % 2 === 0 ? 1 : -1;
@@ -1701,7 +2362,6 @@ export class LevelGenerator {
             this.meshes.push(hill);
         }
 
-        // Layer 2: Distant majestic alpine mountains with crisp snow caps
         const mountainColors = [0x1e293b, 0x334155, 0x0f172a];
         for (let i = 0; i < 18; i++) {
             const side = i % 2 === 0 ? 1 : -1;
@@ -1722,13 +2382,8 @@ export class LevelGenerator {
             this.scene.add(mountain);
             this.meshes.push(mountain);
 
-            // Clean white snow cap peak
             const peakGeo = new THREE.ConeGeometry(radius * 0.32, height * 0.28, 6);
-            const peakMat = new THREE.MeshStandardMaterial({ 
-                color: 0xf8fafc,
-                flatShading: true,
-                roughness: 0.4
-            });
+            const peakMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, flatShading: true, roughness: 0.4 });
             const peak = new THREE.Mesh(peakGeo, peakMat);
             peak.position.set(x, height * 0.78, z);
             peak.userData.dynamic = true;

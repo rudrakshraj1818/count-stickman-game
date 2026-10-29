@@ -424,11 +424,12 @@ export class Game {
 
         // Update single hero world position along natural curving temple road
         const pathCenterX = this.levelGenerator ? this.levelGenerator.getPathCenterX(this.trackZ) : 0;
+        const roadAngle = (this.levelGenerator && this.levelGenerator.getPathTangentAngle) ? this.levelGenerator.getPathTangentAngle(this.trackZ) : 0;
         const heroWorldX = pathCenterX + this.playerX;
-        this.crowdManager.updatePlayerPosition(heroWorldX, -this.trackZ, this.jumpY, this.isSliding);
+        this.crowdManager.updatePlayerPosition(heroWorldX, -this.trackZ, this.jumpY, this.isSliding, roadAngle);
 
         // Third-Person Camera follow behind hero with forward road curve look-ahead and jump offset
-        const targetCamX = heroWorldX * 0.82;
+        const targetCamX = heroWorldX * 0.85;
         const targetCamY = 3.3 + this.jumpY * 0.35;
         const targetCamZ = -this.trackZ + 5.8;
 
@@ -457,6 +458,9 @@ export class Game {
             this.sunGroup.position.set(35, 45, -this.trackZ - 120);
         }
 
+        // Smooth gradual environmental atmosphere transitions across the 3 zones
+        this.updateEnvironmentAtmosphere(delta);
+
         // Check collisions for collectibles, obstacles, enemies
         this.checkCollectibleCollisions();
         this.checkObstacleCollisions();
@@ -478,6 +482,56 @@ export class Game {
 
         // Update HUD
         this.ui.updateHUDInfo();
+    }
+
+    updateEnvironmentAtmosphere(delta) {
+        if (!this.scene || !this.scene.fog) return;
+        const progress = Math.min(1, Math.max(0, this.trackZ / this.trackLength));
+
+        let targetFogColor;
+        let targetFogNear = 75;
+        let targetFogFar = 220;
+        let targetHemiSky;
+        let targetHemiGround;
+
+        if (progress < 0.35) {
+            // Zone 1: Ancient Forest - Lush mist with sunlit green and blue hues
+            const t = progress / 0.35;
+            targetFogColor = new THREE.Color(0x7dd3fc).lerp(new THREE.Color(0x9bd8b5), t * 0.6);
+            targetHemiSky = new THREE.Color(0x82dbf5);
+            targetHemiGround = new THREE.Color(0x286338);
+            targetFogNear = 80;
+            targetFogFar = 220;
+        } else if (progress < 0.70) {
+            // Zone 2: Ancient Ruins - Warm golden antique stone haze
+            const t = (progress - 0.35) / 0.35;
+            targetFogColor = new THREE.Color(0x9bd8b5).lerp(new THREE.Color(0xd2b68c), t);
+            targetHemiSky = new THREE.Color(0xf2d6a2);
+            targetHemiGround = new THREE.Color(0x52422e);
+            targetFogNear = 65;
+            targetFogFar = 185;
+        } else {
+            // Zone 3: Magical Temple / Castle - Deep mysterious twilight sanctuary with glowing runes
+            const t = Math.min(1, (progress - 0.70) / 0.30);
+            targetFogColor = new THREE.Color(0xd2b68c).lerp(new THREE.Color(0x1a1832), t);
+            targetHemiSky = new THREE.Color(0xf2d6a2).lerp(new THREE.Color(0x403c7a), t);
+            targetHemiGround = new THREE.Color(0x52422e).lerp(new THREE.Color(0x10131f), t);
+            targetFogNear = 50;
+            targetFogFar = 150;
+        }
+
+        // Interpolate fog and ambient lighting gracefully
+        this.scene.fog.color.lerp(targetFogColor, Math.min(1, delta * 2.0));
+        this.scene.fog.near += (targetFogNear - this.scene.fog.near) * Math.min(1, delta * 2.0);
+        this.scene.fog.far += (targetFogFar - this.scene.fog.far) * Math.min(1, delta * 2.0);
+
+        if (this.renderer) {
+            this.renderer.setClearColor(this.scene.fog.color, 1);
+        }
+        if (this.hemiLight && targetHemiSky && targetHemiGround) {
+            this.hemiLight.color.lerp(targetHemiSky, Math.min(1, delta * 2.0));
+            this.hemiLight.groundColor.lerp(targetHemiGround, Math.min(1, delta * 2.0));
+        }
     }
 
     checkCollectibleCollisions() {
