@@ -58,7 +58,7 @@ export class Game {
         
         // 3-Lane Temple Run Movement
         this.currentLane = 0; // -1: Left, 0: Center, 1: Right
-        this.LANE_WIDTH = 3.2;
+        this.LANE_WIDTH = 2.25;
         this.playerX = 0;
         this.laneChangeSpeed = 22;
         this.speed = 9;
@@ -493,10 +493,10 @@ export class Game {
 
             const dz = Math.abs(item.z - playerZ);
             const inLane = (item.laneX !== undefined) 
-                ? Math.abs(this.playerX - item.laneX) < 1.45
-                : Math.abs(heroWorldX - item.x) < 1.45;
+                ? Math.abs(this.playerX - item.laneX) < 0.95
+                : Math.abs(heroWorldX - item.x) < 0.95;
 
-            if (inLane && dz < (item.radius || 1.35)) {
+            if (inLane && dz < (item.radius || 1.15)) {
                 item.collected = true;
                 if (item.mesh) {
                     this.scene.remove(item.mesh);
@@ -626,8 +626,8 @@ export class Game {
 
             if (dz < 1.35) {
                 const inLane = (obs.laneX !== undefined)
-                    ? Math.abs(this.playerX - obs.laneX) < 1.45
-                    : Math.abs(heroWorldX - obs.worldX) < (obs.width / 2 + 0.4);
+                    ? Math.abs(this.playerX - obs.laneX) < 0.9
+                    : Math.abs(heroWorldX - obs.worldX) < (obs.width / 2 + 0.15);
 
                 if (!inLane) continue;
 

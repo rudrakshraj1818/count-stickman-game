@@ -76,13 +76,14 @@ export class LevelGenerator {
             metalness: 0.1
         });
 
-        // 1. Build segmented curving natural stone highway
+        // 1. Build segmented curving natural stone highway with focused 3-lane proportions
         for (let i = 0; i < segCount; i++) {
             const zStart = i * segLen;
             const zCenter = zStart + segLen / 2;
             const cx = this.getPathCenterX(zCenter);
             const isFork = this.isForkZone(zCenter);
-            const roadWidth = isFork ? 14.8 : 12.0;
+            // Focused 3-lane track proportions (reduced by ~35% from oversized 12.0m platform)
+            const roadWidth = isFork ? 8.8 : 7.6;
 
             // Main stone road slab
             const mat = stonePalette[i % stonePalette.length];
@@ -94,11 +95,11 @@ export class LevelGenerator {
             this.scene.add(slab);
             this.meshes.push(slab);
 
-            // Carved outer stone curbs on both edges
-            const curbGeo = new THREE.BoxGeometry(0.5, 0.45, segLen);
+            // Carved outer stone curbs cleanly framing the 3 lanes
+            const curbGeo = new THREE.BoxGeometry(0.4, 0.45, segLen);
             
             const leftCurb = new THREE.Mesh(curbGeo, curbMat);
-            leftCurb.position.set(cx - roadWidth / 2 - 0.25, 0.15, -zCenter);
+            leftCurb.position.set(cx - roadWidth / 2 - 0.2, 0.15, -zCenter);
             leftCurb.castShadow = true;
             leftCurb.receiveShadow = true;
             leftCurb.userData.dynamic = true;
@@ -106,7 +107,7 @@ export class LevelGenerator {
             this.meshes.push(leftCurb);
 
             const rightCurb = new THREE.Mesh(curbGeo, curbMat);
-            rightCurb.position.set(cx + roadWidth / 2 + 0.25, 0.15, -zCenter);
+            rightCurb.position.set(cx + roadWidth / 2 + 0.2, 0.15, -zCenter);
             rightCurb.castShadow = true;
             rightCurb.receiveShadow = true;
             rightCurb.userData.dynamic = true;
@@ -115,19 +116,19 @@ export class LevelGenerator {
 
             // In fork zones: create dividing ancient ruin curb islands separating Left, Center, Right paths
             if (isFork) {
-                const islandGeo = new THREE.BoxGeometry(0.65, 0.4, segLen);
+                const islandGeo = new THREE.BoxGeometry(0.38, 0.38, segLen);
                 
-                // Left divider island (splits Left path from Center path)
+                // Left divider island (splits Left path from Center path at x = -1.125)
                 const leftIsland = new THREE.Mesh(islandGeo, dividerMat);
-                leftIsland.position.set(cx - 1.8, 0.15, -zCenter);
+                leftIsland.position.set(cx - 1.125, 0.15, -zCenter);
                 leftIsland.castShadow = true;
                 leftIsland.userData.dynamic = true;
                 this.scene.add(leftIsland);
                 this.meshes.push(leftIsland);
 
-                // Right divider island (splits Center path from Right path)
+                // Right divider island (splits Center path from Right path at x = +1.125)
                 const rightIsland = new THREE.Mesh(islandGeo, dividerMat);
-                rightIsland.position.set(cx + 1.8, 0.15, -zCenter);
+                rightIsland.position.set(cx + 1.125, 0.15, -zCenter);
                 rightIsland.castShadow = true;
                 rightIsland.userData.dynamic = true;
                 this.scene.add(rightIsland);
@@ -137,66 +138,82 @@ export class LevelGenerator {
                 if (zStart % 65 < segLen) {
                     this.createForkEntranceSign(cx, zStart);
                 }
+            } else {
+                // Continuous carved stone lane divider grooves separating the 3 lanes (Left | Center | Right)
+                const laneDivMat = new THREE.MeshBasicMaterial({ color: 0x4e3e2c, transparent: true, opacity: 0.55 });
+                const leftDivGeo = new THREE.PlaneGeometry(0.1, segLen);
+                
+                const leftDiv = new THREE.Mesh(leftDivGeo, laneDivMat);
+                leftDiv.rotation.x = -Math.PI / 2;
+                leftDiv.position.set(cx - 1.125, 0.14, -zCenter);
+                leftDiv.userData.dynamic = true;
+                this.scene.add(leftDiv);
+                this.meshes.push(leftDiv);
+
+                const rightDiv = new THREE.Mesh(leftDivGeo, laneDivMat);
+                rightDiv.rotation.x = -Math.PI / 2;
+                rightDiv.position.set(cx + 1.125, 0.14, -zCenter);
+                rightDiv.userData.dynamic = true;
+                this.scene.add(rightDiv);
+                this.meshes.push(rightDiv);
             }
 
-            // Flagstone tile patterns (carved inlay lines along the road)
-            for (let t = -roadWidth / 2 + 1.5; t < roadWidth / 2; t += 2.2) {
-                const tileGeo = new THREE.PlaneGeometry(0.08, segLen);
-                const tileMat = new THREE.MeshBasicMaterial({ color: 0x4a3b2c, transparent: true, opacity: 0.35 });
-                const line = new THREE.Mesh(tileGeo, tileMat);
-                line.rotation.x = -Math.PI / 2;
-                line.position.set(cx + t, 0.14, -zCenter);
-                line.userData.dynamic = true;
-                this.scene.add(line);
-                this.meshes.push(line);
-            }
+            // Flagstone transverse joint seams across the track every segment
+            const seamGeo = new THREE.PlaneGeometry(roadWidth - 0.2, 0.06);
+            const seamMat = new THREE.MeshBasicMaterial({ color: 0x423425, transparent: true, opacity: 0.4 });
+            const seam = new THREE.Mesh(seamGeo, seamMat);
+            seam.rotation.x = -Math.PI / 2;
+            seam.position.set(cx, 0.14, -zStart);
+            seam.userData.dynamic = true;
+            this.scene.add(seam);
+            this.meshes.push(seam);
 
             // Stone torch braziers with warm fire light along the verges every ~18 units
             if (i % 4 === 0) {
-                this.createBrazier(cx - roadWidth / 2 - 0.9, zCenter);
-                this.createBrazier(cx + roadWidth / 2 + 0.9, zCenter);
+                this.createBrazier(cx - roadWidth / 2 - 0.65, zCenter);
+                this.createBrazier(cx + roadWidth / 2 + 0.65, zCenter);
             }
         }
 
-        // 2. Grand Ancient Temple Start Gateway
+        // 2. Grand Ancient Temple Start Gateway - Proportional to 3-lane road
         const startArchGroup = new THREE.Group();
         const templeStoneMat = new THREE.MeshStandardMaterial({ color: 0x8a7356, roughness: 0.75, metalness: 0.15 });
         const goldReliefMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.8, roughness: 0.25 });
 
-        // Left & right fluted temple pillars
-        const pillarGeo = new THREE.CylinderGeometry(0.65, 0.75, 6.2, 12);
+        // Left & right fluted temple pillars flanking the narrowed road
+        const pillarGeo = new THREE.CylinderGeometry(0.55, 0.65, 5.8, 12);
         const leftPillar = new THREE.Mesh(pillarGeo, templeStoneMat);
-        leftPillar.position.set(-6.8, 3.1, -0.5);
+        leftPillar.position.set(-4.3, 2.9, -0.5);
         leftPillar.castShadow = true;
         startArchGroup.add(leftPillar);
 
         const rightPillar = new THREE.Mesh(pillarGeo, templeStoneMat);
-        rightPillar.position.set(6.8, 3.1, -0.5);
+        rightPillar.position.set(4.3, 2.9, -0.5);
         rightPillar.castShadow = true;
         startArchGroup.add(rightPillar);
 
         // Pillar capitals with gold trim
-        const capGeo = new THREE.BoxGeometry(1.6, 0.5, 1.6);
+        const capGeo = new THREE.BoxGeometry(1.3, 0.45, 1.3);
         const leftCap = new THREE.Mesh(capGeo, goldReliefMat);
-        leftCap.position.set(-6.8, 6.3, -0.5);
+        leftCap.position.set(-4.3, 5.8, -0.5);
         startArchGroup.add(leftCap);
 
         const rightCap = new THREE.Mesh(capGeo, goldReliefMat);
-        rightCap.position.set(6.8, 6.3, -0.5);
+        rightCap.position.set(4.3, 5.8, -0.5);
         startArchGroup.add(rightCap);
 
-        // Heavy carved stone lintel arch beam
-        const beamGeo = new THREE.BoxGeometry(15.6, 1.1, 1.4);
+        // Heavy carved stone lintel arch beam spanning over the 3 lanes
+        const beamGeo = new THREE.BoxGeometry(9.4, 1.0, 1.3);
         const topBeam = new THREE.Mesh(beamGeo, templeStoneMat);
-        topBeam.position.set(0, 6.8, -0.5);
+        topBeam.position.set(0, 6.3, -0.5);
         topBeam.castShadow = true;
         startArchGroup.add(topBeam);
 
         // Ornate golden sun crest in center
-        const sunCrestGeo = new THREE.CylinderGeometry(1.2, 1.2, 0.3, 16);
+        const sunCrestGeo = new THREE.CylinderGeometry(1.0, 1.0, 0.25, 16);
         const sunCrest = new THREE.Mesh(sunCrestGeo, goldReliefMat);
         sunCrest.rotation.x = Math.PI / 2;
-        sunCrest.position.set(0, 7.8, -0.5);
+        sunCrest.position.set(0, 7.3, -0.5);
         startArchGroup.add(sunCrest);
 
         // Start Banner canvas
@@ -219,10 +236,10 @@ export class LevelGenerator {
         sCtx.fillText('🏛️ TEMPLE ADVENTURE 🏛️', 256, 64);
 
         const startTex = new THREE.CanvasTexture(startCanvas);
-        const startLabelGeo = new THREE.PlaneGeometry(7.2, 1.8);
+        const startLabelGeo = new THREE.PlaneGeometry(5.2, 1.4);
         const startLabelMat = new THREE.MeshBasicMaterial({ map: startTex, transparent: true });
         const startBanner = new THREE.Mesh(startLabelGeo, startLabelMat);
-        startBanner.position.set(0, 8.8, -0.5);
+        startBanner.position.set(0, 8.2, -0.5);
         startArchGroup.add(startBanner);
 
         startArchGroup.userData.dynamic = true;
@@ -252,33 +269,33 @@ export class LevelGenerator {
         const stoneMat = new THREE.MeshStandardMaterial({ color: 0x7a654d, roughness: 0.8 });
         const goldMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.8, roughness: 0.25 });
 
-        // Left path marker obelisk
-        const obeliskGeo = new THREE.CylinderGeometry(0.3, 0.45, 2.8, 6);
+        // Left path marker obelisk at divider island
+        const obeliskGeo = new THREE.CylinderGeometry(0.24, 0.36, 2.7, 6);
         const leftObelisk = new THREE.Mesh(obeliskGeo, stoneMat);
-        leftObelisk.position.set(cx - 1.8, 1.4, -z);
+        leftObelisk.position.set(cx - 1.125, 1.35, -z);
         leftObelisk.castShadow = true;
         group.add(leftObelisk);
 
-        // Right path marker obelisk
+        // Right path marker obelisk at divider island
         const rightObelisk = new THREE.Mesh(obeliskGeo, stoneMat);
-        rightObelisk.position.set(cx + 1.8, 1.4, -z);
+        rightObelisk.position.set(cx + 1.125, 1.35, -z);
         rightObelisk.castShadow = true;
         group.add(rightObelisk);
 
         // Small decorative golden rune orbs on obelisks
-        const orbGeo = new THREE.SphereGeometry(0.25, 8, 8);
+        const orbGeo = new THREE.SphereGeometry(0.2, 8, 8);
         const leftOrb = new THREE.Mesh(orbGeo, goldMat);
-        leftOrb.position.set(cx - 1.8, 2.9, -z);
+        leftOrb.position.set(cx - 1.125, 2.8, -z);
         group.add(leftOrb);
 
         const rightOrb = new THREE.Mesh(orbGeo, goldMat);
-        rightOrb.position.set(cx + 1.8, 2.9, -z);
+        rightOrb.position.set(cx + 1.125, 2.8, -z);
         group.add(rightOrb);
 
         // Overhead stone lintel connecting the dividers with path arrows
-        const beamGeo = new THREE.BoxGeometry(4.2, 0.4, 0.4);
+        const beamGeo = new THREE.BoxGeometry(2.7, 0.35, 0.35);
         const beam = new THREE.Mesh(beamGeo, stoneMat);
-        beam.position.set(cx, 3.4, -z);
+        beam.position.set(cx, 3.2, -z);
         group.add(beam);
 
         // Canvas sign: "◀ PATH CHOICE ▶"
@@ -299,10 +316,10 @@ export class LevelGenerator {
         ctx.fillText('◀ PATH CHOICE ▶', 192, 48);
 
         const tex = new THREE.CanvasTexture(canvas);
-        const labelGeo = new THREE.PlaneGeometry(3.6, 0.9);
+        const labelGeo = new THREE.PlaneGeometry(2.5, 0.65);
         const labelMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
         const label = new THREE.Mesh(labelGeo, labelMat);
-        label.position.set(cx, 4.2, -z);
+        label.position.set(cx, 3.8, -z);
         group.add(label);
 
         group.userData.dynamic = true;
@@ -354,7 +371,7 @@ export class LevelGenerator {
         // Distribute trails of collectible coins, health flasks, and power-up relics along the 3 fixed lanes
         const stepZ = 11;
         const totalSteps = Math.floor((trackLength - 28) / stepZ);
-        const LANE_WIDTH = 3.2;
+        const LANE_WIDTH = 2.25;
 
         for (let s = 1; s < totalSteps; s++) {
             const z = 16 + s * stepZ;
@@ -389,7 +406,7 @@ export class LevelGenerator {
         }
     }
 
-    spawnCoin(laneIndex, z, laneWidth = 3.2) {
+    spawnCoin(laneIndex, z, laneWidth = 2.25) {
         const group = new THREE.Group();
         const laneX = laneIndex * laneWidth;
         const cx = this.getPathCenterX(z);
@@ -435,12 +452,12 @@ export class LevelGenerator {
             mesh: group,
             collected: false,
             value: 1,
-            radius: 1.35,
+            radius: 1.0,
             phase: Math.random() * Math.PI * 2
         });
     }
 
-    spawnHealthPickup(laneIndex, z, laneWidth = 3.2) {
+    spawnHealthPickup(laneIndex, z, laneWidth = 2.25) {
         const group = new THREE.Group();
         const laneX = laneIndex * laneWidth;
         const cx = this.getPathCenterX(z);
@@ -488,12 +505,12 @@ export class LevelGenerator {
             mesh: group,
             collected: false,
             value: 30,
-            radius: 1.4,
+            radius: 1.0,
             phase: Math.random() * Math.PI * 2
         });
     }
 
-    spawnPowerUpPickup(laneIndex, z, laneWidth = 3.2) {
+    spawnPowerUpPickup(laneIndex, z, laneWidth = 2.25) {
         const group = new THREE.Group();
         const laneX = laneIndex * laneWidth;
         const cx = this.getPathCenterX(z);
@@ -534,7 +551,7 @@ export class LevelGenerator {
             mesh: group,
             collected: false,
             value: 25,
-            radius: 1.4,
+            radius: 1.0,
             phase: Math.random() * Math.PI * 2
         });
     }
@@ -547,7 +564,7 @@ export class LevelGenerator {
         this.obstacles = [];
         const count = 10 + level * 2;
         const enemyZones = [50, 95, 140, 185]; // Avoid enemy zones
-        const LANE_WIDTH = 3.2;
+        const LANE_WIDTH = 2.25;
 
         for (let i = 0; i < count; i++) {
             let z;
@@ -565,7 +582,8 @@ export class LevelGenerator {
             const laneIndex = laneIndices[(i * 2 + 1) % 3];
             const laneX = laneIndex * LANE_WIDTH;
             const worldX = cx + laneX;
-            const width = 2.8;
+            // Obstacle width scaled to cleanly fit single 2.25m lane
+            const width = 1.85;
 
             // Pattern cycle:
             // 0: low fallen pillar
@@ -861,7 +879,7 @@ export class LevelGenerator {
 
         for (let i = 0; i < displayCount; i++) {
             const angle = (i / displayCount) * Math.PI * 2 + Math.random() * 0.5;
-            const radius = Math.sqrt(i / displayCount) * 2.5;
+            const radius = Math.sqrt(i / displayCount) * 1.7;
             // Rival Raider color: dark menacing crimson
             const stickman = this.createStickman(0x880e4f);
             stickman.position.set(
@@ -1067,52 +1085,52 @@ export class LevelGenerator {
         const templeStoneMat = new THREE.MeshStandardMaterial({ color: 0x8a7356, roughness: 0.75, metalness: 0.15 });
         const goldMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.85, roughness: 0.2 });
 
-        // Sanctuary stone floor dais
-        const daisGeo = new THREE.BoxGeometry(18, 0.4, 20);
+        // Sanctuary stone floor dais scaled to 3-lane proportions
+        const daisGeo = new THREE.BoxGeometry(11.0, 0.4, 18);
         const dais = new THREE.Mesh(daisGeo, templeStoneMat);
         dais.position.set(0, 0.2, -trackLength);
         dais.receiveShadow = true;
         sanctuaryGroup.add(dais);
 
-        // Flanking carved victory colonnade
+        // Flanking carved victory colonnade hugging dais edges
         for (let side of [-1, 1]) {
             for (let c = 0; c < 3; c++) {
-                const colGeo = new THREE.CylinderGeometry(0.7, 0.8, 7.5, 12);
+                const colGeo = new THREE.CylinderGeometry(0.55, 0.65, 7.2, 12);
                 const col = new THREE.Mesh(colGeo, templeStoneMat);
-                col.position.set(side * 8.5, 3.9, -trackLength + (c - 1) * 6);
+                col.position.set(side * 5.2, 3.8, -trackLength + (c - 1) * 5.5);
                 col.castShadow = true;
                 sanctuaryGroup.add(col);
 
-                const colCap = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.6, 1.8), goldMat);
-                colCap.position.set(side * 8.5, 7.8, -trackLength + (c - 1) * 6);
+                const colCap = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.5, 1.4), goldMat);
+                colCap.position.set(side * 5.2, 7.5, -trackLength + (c - 1) * 5.5);
                 sanctuaryGroup.add(colCap);
             }
         }
 
         // Towering Grand Victory Archway
-        const leftPylon = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.0, 9.5, 12), templeStoneMat);
-        leftPylon.position.set(-6.5, 4.8, -trackLength);
+        const leftPylon = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.85, 9.2, 12), templeStoneMat);
+        leftPylon.position.set(-4.4, 4.6, -trackLength);
         leftPylon.castShadow = true;
         sanctuaryGroup.add(leftPylon);
 
-        const rightPylon = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.0, 9.5, 12), templeStoneMat);
-        rightPylon.position.set(6.5, 4.8, -trackLength);
+        const rightPylon = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.85, 9.2, 12), templeStoneMat);
+        rightPylon.position.set(4.4, 4.6, -trackLength);
         rightPylon.castShadow = true;
         sanctuaryGroup.add(rightPylon);
 
-        const topArch = new THREE.Mesh(new THREE.BoxGeometry(16, 1.5, 1.8), templeStoneMat);
-        topArch.position.set(0, 9.8, -trackLength);
+        const topArch = new THREE.Mesh(new THREE.BoxGeometry(10.0, 1.3, 1.6), templeStoneMat);
+        topArch.position.set(0, 9.2, -trackLength);
         topArch.castShadow = true;
         sanctuaryGroup.add(topArch);
 
         // Ancient Sun-Disc Crest
-        const sunDisc = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 0.4, 24), goldMat);
+        const sunDisc = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 0.35, 24), goldMat);
         sunDisc.rotation.x = Math.PI / 2;
-        sunDisc.position.set(0, 11.2, -trackLength);
+        sunDisc.position.set(0, 10.4, -trackLength);
         sanctuaryGroup.add(sunDisc);
 
         // Radiant Mystic Victory Portal (Glow plane)
-        const portalGeo = new THREE.PlaneGeometry(10.5, 8.2);
+        const portalGeo = new THREE.PlaneGeometry(7.2, 7.5);
         const portalMat = new THREE.MeshBasicMaterial({
             color: 0x00f0ff,
             transparent: true,
@@ -1120,13 +1138,13 @@ export class LevelGenerator {
             side: THREE.DoubleSide
         });
         const portal = new THREE.Mesh(portalGeo, portalMat);
-        portal.position.set(0, 4.5, -trackLength);
+        portal.position.set(0, 4.2, -trackLength);
         sanctuaryGroup.add(portal);
 
         // Golden Victory Ring inside the portal
-        const ringGeo = new THREE.TorusGeometry(3.6, 0.25, 16, 32);
+        const ringGeo = new THREE.TorusGeometry(2.8, 0.2, 16, 32);
         const ring = new THREE.Mesh(ringGeo, goldMat);
-        ring.position.set(0, 4.5, -trackLength + 0.1);
+        ring.position.set(0, 4.2, -trackLength + 0.1);
         sanctuaryGroup.add(ring);
 
         // Overhead Victory Banner
@@ -1149,15 +1167,15 @@ export class LevelGenerator {
         ctx.fillText('🏛️ TEMPLE SANCTUARY 🏛️', 256, 64);
 
         const tex = new THREE.CanvasTexture(canvas);
-        const labelGeo = new THREE.PlaneGeometry(7.2, 1.8);
+        const labelGeo = new THREE.PlaneGeometry(5.2, 1.4);
         const labelMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
         const label = new THREE.Mesh(labelGeo, labelMat);
-        label.position.set(0, 12.6, -trackLength);
+        label.position.set(0, 11.6, -trackLength);
         sanctuaryGroup.add(label);
 
         // Ceremonial flame braziers on sanctuary approach
-        this.createBrazier(-5.2, trackLength - 4);
-        this.createBrazier(5.2, trackLength - 4);
+        this.createBrazier(-4.3, trackLength - 4);
+        this.createBrazier(4.3, trackLength - 4);
 
         sanctuaryGroup.userData.dynamic = true;
         this.scene.add(sanctuaryGroup);
@@ -1183,68 +1201,77 @@ export class LevelGenerator {
 
                 // Zone 1: Meadow Parkway (Start to 35%)
                 if (progress < 0.35) {
-                    // Immediate verge: roadside flags & flowering bushes
-                    if (rand < 0.25) {
-                        const flagX = side * 5.6;
+                    // Immediate verge: roadside flags, ruined temple walls & flowering bushes hugging curb
+                    if (rand < 0.22) {
+                        const flagX = side * 4.3;
                         const flagCol = side > 0 ? 0x0284c7 : 0xf43f5e;
                         this.createRoadsideFlag(flagX, jitterZ, flagCol);
-                    } else if (rand < 0.55) {
-                        const bushX = side * (6.8 + Math.random() * 2.2);
+                    } else if (rand < 0.42) {
+                        const wallX = side * 4.35;
+                        this.createRuinedWall(wallX, jitterZ, 3.8);
+                    } else if (rand < 0.65) {
+                        const bushX = side * (4.4 + Math.random() * 1.4);
                         const flowerCol = Math.random() > 0.5 ? 0xf43f5e : 0xfacc15;
                         this.createBush(bushX, jitterZ, 0.7 + Math.random() * 0.4, flowerCol);
                     }
 
                     // Mid verge: Lush round fluffy trees & boulders
-                    const treeX = side * (8.5 + Math.random() * 14);
+                    const treeX = side * (5.6 + Math.random() * 8);
                     const treeScale = 0.85 + Math.random() * 0.5;
                     const foliageCols = [0x22c55e, 0x16a34a, 0x15803d, 0x4ade80];
                     const fCol = foliageCols[Math.floor(Math.random() * foliageCols.length)];
                     this.createRoundTree(treeX, jitterZ, treeScale, fCol);
 
-                    if (Math.random() > 0.4) {
-                        const rockX = side * (7.5 + Math.random() * 12);
+                    if (Math.random() > 0.35) {
+                        const rockX = side * (4.6 + Math.random() * 5);
                         this.createRock(rockX, jitterZ + 2, 0.5 + Math.random() * 0.6);
                     }
                 }
                 // Zone 2: Palm Oasis & Valley (35% to 72%)
                 else if (progress < 0.72) {
-                    // Verge: arcade crystals & warm boulders
-                    if (rand < 0.3) {
-                        const crysX = side * (7.0 + Math.random() * 3.5);
+                    // Verge: arcade crystals, ancient ruin walls & warm boulders right beside curb
+                    if (rand < 0.25) {
+                        const crysX = side * (4.5 + Math.random() * 1.8);
                         this.createArcadeCrystal(crysX, jitterZ);
-                    } else if (rand < 0.6) {
-                        const bushX = side * (6.8 + Math.random() * 2.5);
+                    } else if (rand < 0.45) {
+                        const wallX = side * 4.35;
+                        this.createRuinedWall(wallX, jitterZ, 4.2);
+                    } else if (rand < 0.7) {
+                        const bushX = side * (4.4 + Math.random() * 1.5);
                         this.createBush(bushX, jitterZ, 0.8 + Math.random() * 0.3, 0xa855f7);
                     }
 
                     // Mid verge: Stylized arcade palms & scattered conifers
-                    const treeX = side * (8.5 + Math.random() * 15);
+                    const treeX = side * (5.6 + Math.random() * 8);
                     if (Math.random() > 0.3) {
                         this.createPalmTree(treeX, jitterZ, 0.9 + Math.random() * 0.4);
                     } else {
                         this.createPineTree(treeX, jitterZ, 0.85 + Math.random() * 0.4);
                     }
 
-                    const rockX = side * (8.0 + Math.random() * 12);
+                    const rockX = side * (4.6 + Math.random() * 5);
                     this.createRock(rockX, jitterZ - 1.5, 0.6 + Math.random() * 0.7);
                 }
                 // Zone 3: Colosseum & Arena Approach (72% to 100%)
                 else {
-                    // Verge: Grand stone obelisks & triumphant flags
-                    if (rand < 0.35) {
-                        const pylonX = side * 5.8;
+                    // Verge: Grand stone obelisks, ruined balustrades & triumphant flags
+                    if (rand < 0.3) {
+                        const pylonX = side * 4.4;
                         this.createObelisk(pylonX, jitterZ, 0.9 + Math.random() * 0.3);
-                    } else if (rand < 0.65) {
-                        const flagX = side * 5.6;
+                    } else if (rand < 0.5) {
+                        const wallX = side * 4.35;
+                        this.createRuinedWall(wallX, jitterZ, 4.0);
+                    } else if (rand < 0.7) {
+                        const flagX = side * 4.2;
                         this.createRoadsideFlag(flagX, jitterZ, 0xfacc15);
                     }
 
                     // Mid verge: Dense alpine evergreen pines framing the approach
-                    const pineX = side * (8.0 + Math.random() * 16);
+                    const pineX = side * (5.4 + Math.random() * 8);
                     this.createPineTree(pineX, jitterZ, 1.0 + Math.random() * 0.6);
 
-                    if (Math.random() > 0.35) {
-                        const rockX = side * (7.5 + Math.random() * 10);
+                    if (Math.random() > 0.3) {
+                        const rockX = side * (4.6 + Math.random() * 5);
                         this.createRock(rockX, jitterZ + 1.2, 0.7 + Math.random() * 0.7);
                     }
                 }
@@ -1477,6 +1504,44 @@ export class LevelGenerator {
         rock.userData.dynamic = true;
         this.scene.add(rock);
         this.meshes.push(rock);
+    }
+
+    createRuinedWall(x, z, length = 4.0) {
+        const group = new THREE.Group();
+        const stoneMat = new THREE.MeshStandardMaterial({ color: 0x7a654d, roughness: 0.85, metalness: 0.1 });
+        const trimMat = new THREE.MeshStandardMaterial({ color: 0x5a4836, roughness: 0.9 });
+
+        // Low ancient stone balustrade / wall
+        const wallGeo = new THREE.BoxGeometry(0.32, 0.7, length);
+        const wall = new THREE.Mesh(wallGeo, stoneMat);
+        wall.position.y = 0.35;
+        wall.castShadow = true;
+        wall.receiveShadow = true;
+        group.add(wall);
+
+        // Weathered coping slab on top
+        const capGeo = new THREE.BoxGeometry(0.42, 0.12, length + 0.15);
+        const cap = new THREE.Mesh(capGeo, trimMat);
+        cap.position.y = 0.76;
+        cap.castShadow = true;
+        group.add(cap);
+
+        // Flanking pillar posts
+        const postGeo = new THREE.BoxGeometry(0.48, 0.9, 0.48);
+        const p1 = new THREE.Mesh(postGeo, stoneMat);
+        p1.position.set(0, 0.45, -length / 2);
+        p1.castShadow = true;
+        group.add(p1);
+
+        const p2 = new THREE.Mesh(postGeo, stoneMat);
+        p2.position.set(0, 0.45, length / 2);
+        p2.castShadow = true;
+        group.add(p2);
+
+        group.position.set(x, 0, z);
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
     }
 
     createRoadsideFlag(x, z, color = 0x0284c7) {
