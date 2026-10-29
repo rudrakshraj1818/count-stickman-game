@@ -1019,13 +1019,24 @@ export class LevelGenerator {
 
         for (let i = 0; i < count; i++) {
             const z = 50 + (i + 1) * spacing;
-            const enemyCount = Math.floor(5 + level * 3 + Math.random() * level * 5);
+            let enemyCount;
+            const isFirst = (i === 0);
+
+            if (isFirst) {
+                // First encounter is an easy, forgiving tutorial introduction!
+                enemyCount = (level === 1) ? 3 : Math.min(5, 3 + level);
+            } else {
+                // Later encounters scale gradually with level and distance
+                enemyCount = Math.floor(4 + i * 2 + level * 2 + Math.random() * level);
+            }
             
             const enemy = {
                 z: z,
                 count: enemyCount,
                 defeated: false,
-                meshes: []
+                meshes: [],
+                encounterIndex: i,
+                isFirstEncounter: (isFirst && level === 1)
             };
 
             // Create enemy crowd visual
@@ -1042,8 +1053,9 @@ export class LevelGenerator {
         for (let i = 0; i < displayCount; i++) {
             const angle = (i / displayCount) * Math.PI * 2 + Math.random() * 0.5;
             const radius = Math.sqrt(i / displayCount) * 1.7;
-            // Rival Raider color: dark menacing crimson
-            const stickman = this.createStickman(0x880e4f);
+            // First encounter has slightly lighter scout armor, later enemies menacing crimson
+            const stickmanColor = enemy.isFirstEncounter ? 0x9c4d2f : 0x880e4f;
+            const stickman = this.createStickman(stickmanColor);
             stickman.position.set(
                 Math.cos(angle) * radius,
                 0,
@@ -1060,28 +1072,33 @@ export class LevelGenerator {
         this.meshes.push(group);
         enemy.meshGroup = group;
 
-        // High-contrast arcade danger badge
+        // High-contrast arcade danger / tutorial badge
         const canvas = document.createElement('canvas');
         canvas.width = 256;
         canvas.height = 128;
         const ctx = canvas.getContext('2d');
         
-        ctx.fillStyle = 'rgba(20, 4, 10, 0.9)';
+        const isTutorial = !!enemy.isFirstEncounter;
+        const borderColor = isTutorial ? '#ffb74d' : '#ff1744';
+        const titleText = isTutorial ? '⚔️ SCOUTS (EASY)' : '⚔️ RIVALS';
+        const titleColor = isTutorial ? '#ffe082' : '#ff8a80';
+
+        ctx.fillStyle = isTutorial ? 'rgba(30, 20, 10, 0.92)' : 'rgba(20, 4, 10, 0.9)';
         ctx.beginPath();
         ctx.roundRect(12, 12, 232, 104, 24);
         ctx.fill();
-        ctx.strokeStyle = '#ff1744';
+        ctx.strokeStyle = borderColor;
         ctx.lineWidth = 6;
         ctx.stroke();
 
-        ctx.fillStyle = '#ff8a80';
-        ctx.font = '900 24px system-ui, sans-serif';
+        ctx.fillStyle = titleColor;
+        ctx.font = '900 22px system-ui, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('⚔️ RIVALS', 128, 44);
+        ctx.fillText(titleText, 128, 44);
 
         ctx.fillStyle = '#ffffff';
         ctx.font = '900 52px system-ui, sans-serif';
-        ctx.shadowColor = '#ff1744';
+        ctx.shadowColor = borderColor;
         ctx.shadowBlur = 15;
         ctx.fillText(count.toString(), 128, 96);
 
@@ -1103,22 +1120,27 @@ export class LevelGenerator {
         canvas.height = 128;
         const ctx = canvas.getContext('2d');
         
-        ctx.fillStyle = 'rgba(20, 4, 10, 0.9)';
+        const isTutorial = !!enemy.isFirstEncounter;
+        const borderColor = isTutorial ? '#ffb74d' : '#ff1744';
+        const titleText = isTutorial ? '⚔️ SCOUTS (EASY)' : '⚔️ RIVALS';
+        const titleColor = isTutorial ? '#ffe082' : '#ff8a80';
+
+        ctx.fillStyle = isTutorial ? 'rgba(30, 20, 10, 0.92)' : 'rgba(20, 4, 10, 0.9)';
         ctx.beginPath();
         ctx.roundRect(12, 12, 232, 104, 24);
         ctx.fill();
-        ctx.strokeStyle = '#ff1744';
+        ctx.strokeStyle = borderColor;
         ctx.lineWidth = 6;
         ctx.stroke();
 
-        ctx.fillStyle = '#ff8a80';
-        ctx.font = '900 24px system-ui, sans-serif';
+        ctx.fillStyle = titleColor;
+        ctx.font = '900 22px system-ui, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('⚔️ RIVALS', 128, 44);
+        ctx.fillText(titleText, 128, 44);
 
         ctx.fillStyle = '#ffffff';
         ctx.font = '900 52px system-ui, sans-serif';
-        ctx.shadowColor = '#ff1744';
+        ctx.shadowColor = borderColor;
         ctx.shadowBlur = 15;
         ctx.fillText(Math.max(0, enemy.remainingCount).toString(), 128, 96);
         
@@ -1178,32 +1200,47 @@ export class LevelGenerator {
                         children[4].rotation.z = -0.4;
                     }
 
-                    // Right arm chops down furiously with jagged cleaver/axe
-                    const attackSpeed = 12.5;
-                    const attackPhase = (this.enemyCombatTime * attackSpeed + i * 1.8 + Math.PI) % (Math.PI * 2);
-                    if (children.length >= 6) {
-                        children[5].rotation.x = Math.sin(attackPhase) * 1.25 - 0.2;
-                        children[5].rotation.y = Math.cos(attackPhase) * 0.35;
-                        children[5].rotation.z = 0.25;
-                    }
+                    // Right arm attack animation or telegraph charge
+                    const isTelegraphing = (this.game && this.game.isEnemyTelegraphing);
+                    if (isTelegraphing) {
+                        // High overhead charge windup - clear visual warning to player!
+                        if (children.length >= 6) {
+                            children[5].rotation.x = -1.6 + Math.sin(this.enemyCombatTime * 25 + i) * 0.08;
+                            children[5].rotation.y = 0.3;
+                            children[5].rotation.z = 0.35;
+                        }
+                        if (children.length >= 1) {
+                            children[0].rotation.x = -0.3;
+                        }
+                        stickman.position.y = 0.12 + Math.sin(this.enemyCombatTime * 28 + i) * 0.04;
+                    } else {
+                        // Rhythmic attack swings scaled to difficulty
+                        const attackSpeed = fightingEnemy.isFirstEncounter ? 5.5 : 8.5;
+                        const attackPhase = (this.enemyCombatTime * attackSpeed + i * 1.8 + Math.PI) % (Math.PI * 2);
+                        if (children.length >= 6) {
+                            children[5].rotation.x = Math.sin(attackPhase) * 1.1 - 0.2;
+                            children[5].rotation.y = Math.cos(attackPhase) * 0.3;
+                            children[5].rotation.z = 0.2;
+                        }
 
-                    // Heavy chopping lunge
-                    if (children.length >= 1) {
-                        children[0].rotation.x = -0.22 - Math.sin(attackPhase) * 0.12;
-                        children[0].rotation.y = -Math.sin(attackPhase) * 0.15;
-                    }
-                    if (children.length >= 2) {
-                        children[1].rotation.x = -0.1 - Math.sin(attackPhase) * 0.08;
-                    }
+                        // Chopping lunge
+                        if (children.length >= 1) {
+                            children[0].rotation.x = -0.18 - Math.sin(attackPhase) * 0.1;
+                            children[0].rotation.y = -Math.sin(attackPhase) * 0.12;
+                        }
+                        if (children.length >= 2) {
+                            children[1].rotation.x = -0.08 - Math.sin(attackPhase) * 0.06;
+                        }
 
-                    // Occasional fiery red slash arc on enemy strike apex
-                    if (attackPhase > 1.7 && attackPhase < 2.1 && Math.random() < 0.2 && crowdManager) {
-                        const worldPos = new THREE.Vector3();
-                        stickman.getWorldPosition(worldPos);
-                        worldPos.y += 0.8;
-                        worldPos.z += 0.35;
-                        worldPos.x += (Math.random() - 0.5) * 0.3;
-                        crowdManager.spawnSlash(worldPos, null, 0xff1744, 0.95);
+                        // Occasional fiery red slash arc on enemy strike apex
+                        if (attackPhase > 1.7 && attackPhase < 2.1 && Math.random() < 0.25 && crowdManager) {
+                            const worldPos = new THREE.Vector3();
+                            stickman.getWorldPosition(worldPos);
+                            worldPos.y += 0.8;
+                            worldPos.z += 0.35;
+                            worldPos.x += (Math.random() - 0.5) * 0.3;
+                            crowdManager.spawnSlash(worldPos, null, 0xff1744, 0.95);
+                        }
                     }
                 } else {
                     // Rear enemy ranks roar and push forward

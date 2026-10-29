@@ -19,6 +19,7 @@ export class CrowdManager {
         this.impactFlashes = [];   // Impact burst rings
         this.sparkParticles = [];  // Small spark particles
         this.trailParticles = [];  // Trailing particles
+        this.invulnerableTimer = 0; // Damage invulnerability timer
     }
 
     clear() {
@@ -422,6 +423,16 @@ export class CrowdManager {
         }
     }
 
+    triggerInvulnerability(duration = 0.85) {
+        this.invulnerableTimer = duration;
+        if (this.heroGroup) {
+            const pos = this.heroGroup.position.clone();
+            pos.y += 0.9;
+            this.spawnImpactFlash(pos, 0x00f0ff);
+            this.spawnSparks(pos, 0x00f0ff, 8);
+        }
+    }
+
     // ============ ANIMATION & GAME LOOP ============
     update(delta, isFighting = false, fightingEnemy = null, playerX = 0, trackZ = 0) {
         this.animTime += delta * 11;
@@ -439,6 +450,16 @@ export class CrowdManager {
             }
         } else if (this.heroModel) {
             this.heroModel.position.x = 0;
+        }
+
+        // Damage-invulnerability flashing / blinking
+        if (this.invulnerableTimer > 0) {
+            this.invulnerableTimer -= delta;
+            if (this.heroModel) {
+                this.heroModel.visible = (Math.floor(this.invulnerableTimer * 22) % 2 === 0);
+            }
+        } else if (this.heroModel && !this.heroModel.visible) {
+            this.heroModel.visible = true;
         }
 
         if (this.heroParts && this.heroModel) {

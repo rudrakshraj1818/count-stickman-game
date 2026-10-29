@@ -317,5 +317,41 @@ export class AudioManager {
         osc.start(t);
         osc.stop(t + 0.05);
     }
+
+    playBlock() {
+        if (!this.initialized || !this.ctx) return;
+        this.resume();
+        const t = this.ctx.currentTime;
+        // Crisp metallic shield deflection ping
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(680, t);
+        osc.frequency.exponentialRampToValueAtTime(1240, t + 0.08);
+        gain.gain.setValueAtTime(0.22, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+        osc.connect(gain);
+        gain.connect(this.sfxGain);
+        osc.start(t);
+        osc.stop(t + 0.14);
+    }
+
+    playWarning() {
+        if (!this.initialized || !this.ctx) return;
+        this.resume();
+        const t = this.ctx.currentTime;
+        // Subtle telegraph warning cue
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(520, t);
+        osc.frequency.linearRampToValueAtTime(740, t + 0.09);
+        gain.gain.setValueAtTime(0.12, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+        osc.connect(gain);
+        gain.connect(this.sfxGain);
+        osc.start(t);
+        osc.stop(t + 0.11);
+    }
 }
 

@@ -94,11 +94,12 @@ export class Game {
 
     calculateHeroStats() {
         const vitality = this.healthUpgrade || this.crowdUpgrade || 1;
-        this.heroMaxHP = 100 + (vitality - 1) * 25 + (this.heroLevel - 1) * 15;
+        // Significantly increased base health and armor for forgiving mobile runner gameplay
+        this.heroMaxHP = 250 + (vitality - 1) * 35 + (this.heroLevel - 1) * 25;
         this.heroHP = this.heroMaxHP;
-        this.heroMaxArmor = 20 + (vitality - 1) * 15 + (this.heroLevel - 1) * 5;
+        this.heroMaxArmor = 50 + (vitality - 1) * 20 + (this.heroLevel - 1) * 10;
         this.heroArmor = this.heroMaxArmor;
-        this.heroAttack = 15 + (this.strengthUpgrade - 1) * 6 + (this.heroLevel - 1) * 3;
+        this.heroAttack = 20 + (this.strengthUpgrade - 1) * 6 + (this.heroLevel - 1) * 4;
     }
 
     init() {
@@ -321,6 +322,10 @@ export class Game {
         this.jumpVelocity = 0;
         this.isSliding = false;
         this.slideTimer = 0;
+        this.invulnerableTimer = 0;
+        this.enemyAttackTimer = 0;
+        this.heroStrikeTimer = 0;
+        this.isEnemyTelegraphing = false;
         
         // Audio
         this.audio.init();
@@ -367,6 +372,10 @@ export class Game {
     }
 
     update(delta) {
+        if (this.invulnerableTimer > 0) {
+            this.invulnerableTimer -= delta;
+        }
+
         if (this.state === 'boss_defeated') {
             this.crowdManager.update(delta);
             this.levelGenerator.updateBossDefeat(delta);
@@ -650,6 +659,13 @@ export class Game {
     }
 
     damageHero(amount) {
+        // Player damage-invulnerability window after being hit
+        if (this.invulnerableTimer > 0) {
+            this.ui.showFloatingText('BLOCKED! 🛡️', '#00f0ff');
+            if (this.audio) this.audio.playBlock();
+            return;
+        }
+
         if (this.heroArmor > 0) {
             if (this.heroArmor >= amount) {
                 this.heroArmor -= amount;
@@ -662,6 +678,13 @@ export class Game {
         if (amount > 0) {
             this.heroHP = Math.max(0, this.heroHP - amount);
         }
+
+        // Grant 0.85s invulnerability window after damage so player is never combo-melted
+        this.invulnerableTimer = 0.85;
+        if (this.crowdManager && this.crowdManager.triggerInvulnerability) {
+            this.crowdManager.triggerInvulnerability(0.85);
+        }
+
         this.ui.updateHUDInfo();
         if (this.heroHP <= 0) {
             this.loseGame();
@@ -748,11 +771,20 @@ export class Game {
                 this.fightingEnemy = enemy;
                 this.fightingEnemy.remainingCount = enemy.count;
                 this.fightTimer = 0;
+                this.heroStrikeTimer = 0.15; // Quick initial hero slash on engage
+                this.enemyAttackTimer = 0;
+                this.isEnemyTelegraphing = false;
                 this.fightCameraTime = 0;
                 this.fightTickCount = 0;
                 this.speed = 0;
                 this.audio.playHit();
-                this.ui.screenShake(8);
+                this.ui.screenShake(6);
+
+                if (enemy.isFirstEncounter) {
+                    this.ui.showFloatingText('⚔️ TUTORIAL: HERO ENGAGING SCOUTS!', '#ffd700');
+                } else {
+                    this.ui.showFloatingText('⚔️ CLASH!', '#ff8a80');
+                }
 
                 const clashPos = new THREE.Vector3(heroWorldX, 0.9, -this.trackZ - 0.7);
                 this.crowdManager.spawnImpactFlash(clashPos, 0xFFFFFF);
@@ -768,30 +800,26 @@ export class Game {
         if (!enemy) return;
 
         this.fightTimer += delta;
-        const strikeInterval = 0.12;
 
-        if (this.fightTimer >= strikeInterval) {
-            this.fightTimer -= strikeInterval;
-            this.fightTickCount = (this.fightTickCount || 0) + 1;
+        // 1. Hero strike loop - reliable, crisp attacks every 0.32s
+        this.heroStrikeTimer = (this.heroStrikeTimer || 0) + delta;
+        const heroStrikeInterval = 0.32;
+
+        if (this.heroStrikeTimer >= heroStrikeInterval) {
+            this.heroStrikeTimer -= heroStrikeInterval;
 
             // Hero strikes enemies with weapon attack power
             const killsPerStrike = this.heroAttack >= 25 ? 2 : 1;
             const enemyKills = Math.min(killsPerStrike, enemy.remainingCount);
             enemy.remainingCount -= enemyKills;
 
-            // Enemy strikes back at hero
-            if (enemy.remainingCount > 0 && (this.fightTickCount % 2 === 0)) {
-                const enemyDmg = Math.min(enemy.remainingCount * 2, 8);
-                this.damageHero(enemyDmg);
-                this.crowdManager.spawnDeathEffect(this.playerX, -this.trackZ, 0x00f0ff);
-            }
-
             // Defeated enemy effects
             if (enemyKills > 0) {
                 if (!enemy.isBoss) {
                     this.levelGenerator.removeEnemyStickman(enemy, enemyKills, this.crowdManager);
                 }
-                const enemyX = (Math.random() - 0.5) * 1.5;
+                const pathCenterX = this.levelGenerator ? this.levelGenerator.getPathCenterX(this.trackZ) : 0;
+                const enemyX = pathCenterX + (Math.random() - 0.5) * 1.5;
                 this.crowdManager.spawnDeathEffect(enemyX, -enemy.z, 0xf44336);
                 this.audio.playFightHit();
             }
@@ -803,33 +831,85 @@ export class Game {
             } else {
                 this.levelGenerator.updateEnemyLabel(enemy);
             }
+        }
 
-            // Check outcome
-            if (enemy.remainingCount <= 0) {
-                enemy.defeated = true;
-                if (enemy.isBoss) {
-                    this.ui.hideBossHealthBar();
-                    this.levelGenerator.playBossDefeatAnimation();
-                    this.ui.screenShake(14);
-                    this.crowdManager.spawnSparks(new THREE.Vector3(0, 3, -enemy.z), 0x9C27B0, 20);
-                    setTimeout(() => this.winGame(), 1200);
-                    this.state = 'boss_defeated';
-                    this.fightingEnemy = null;
+        // 2. Enemy attack loop - generous pacing, telegraphing, and scaled damage
+        this.enemyAttackTimer = (this.enemyAttackTimer || 0) + delta;
+
+        // Attack interval scaled to encounter difficulty
+        let attackInterval;
+        if (enemy.isFirstEncounter) {
+            attackInterval = 1.45; // Generous delay for first tutorial encounter
+        } else if (enemy.encounterIndex === 1 && this.level === 1) {
+            attackInterval = 1.15;
+        } else {
+            attackInterval = Math.max(0.75, 1.35 - (enemy.encounterIndex || 0) * 0.12 - (this.level - 1) * 0.1);
+        }
+
+        const telegraphLead = 0.45; // 0.45s telegraph windup before enemy hits
+        if (this.enemyAttackTimer >= (attackInterval - telegraphLead) && !this.isEnemyTelegraphing && enemy.remainingCount > 0) {
+            this.isEnemyTelegraphing = true;
+            if (this.audio && this.audio.playWarning) this.audio.playWarning();
+            const pathCenterX = this.levelGenerator ? this.levelGenerator.getPathCenterX(this.trackZ) : 0;
+            const clashPos = new THREE.Vector3(pathCenterX + this.playerX, 1.2, -this.trackZ - 0.9);
+            this.crowdManager.spawnImpactFlash(clashPos, 0xff5252);
+        }
+
+        if (this.enemyAttackTimer >= attackInterval) {
+            this.enemyAttackTimer -= attackInterval;
+            this.isEnemyTelegraphing = false;
+
+            // Enemy strikes back at hero
+            if (enemy.remainingCount > 0) {
+                let enemyDmg;
+                if (enemy.isFirstEncounter) {
+                    enemyDmg = 2; // Forgiving tutorial damage (takes dozens of hits to defeat player)
+                } else if (enemy.encounterIndex === 1 && this.level === 1) {
+                    enemyDmg = 3;
                 } else {
-                    this.crowdManager.removeEnemyCrowd(enemy);
-                    this.addHeroXP(35);
-                    this.addCoins(10 + this.level * 2);
-                    this.ui.showFloatingText('+35 XP', '#00e5ff');
-                    this.state = 'playing';
-                    this.speed = 9;
-                    this.fightingEnemy = null;
-                    this.fightCameraTime = 0;
+                    enemyDmg = Math.min(
+                        enemy.remainingCount,
+                        Math.floor(2 + (enemy.encounterIndex || 0) * 1.5 + this.level * 0.8)
+                    );
                 }
-            } else if (this.heroHP <= 0) {
-                this.ui.hideBossHealthBar();
-                this.loseGame();
-                this.fightingEnemy = null;
+                this.damageHero(enemyDmg);
+                const pathCenterX = this.levelGenerator ? this.levelGenerator.getPathCenterX(this.trackZ) : 0;
+                const clashPos = new THREE.Vector3(pathCenterX + this.playerX, 0.9, -this.trackZ - 0.7);
+                this.crowdManager.spawnSlash(clashPos, null, 0xff1744, 1.1);
+                this.crowdManager.spawnSparks(clashPos, 0xff1744, 8);
             }
+        }
+
+        // 3. Check outcome
+        if (enemy.remainingCount <= 0) {
+            enemy.defeated = true;
+            this.isEnemyTelegraphing = false;
+            this.enemyAttackTimer = 0;
+            this.heroStrikeTimer = 0;
+
+            if (enemy.isBoss) {
+                this.ui.hideBossHealthBar();
+                this.levelGenerator.playBossDefeatAnimation();
+                this.ui.screenShake(14);
+                this.crowdManager.spawnSparks(new THREE.Vector3(0, 3, -enemy.z), 0x9C27B0, 20);
+                setTimeout(() => this.winGame(), 1200);
+                this.state = 'boss_defeated';
+                this.fightingEnemy = null;
+            } else {
+                this.crowdManager.removeEnemyCrowd(enemy);
+                this.addHeroXP(35);
+                this.addCoins(10 + this.level * 2);
+                this.ui.showFloatingText('+35 XP', '#00e5ff');
+                this.state = 'playing';
+                this.speed = 9;
+                this.fightingEnemy = null;
+                this.fightCameraTime = 0;
+            }
+        } else if (this.heroHP <= 0) {
+            this.isEnemyTelegraphing = false;
+            this.ui.hideBossHealthBar();
+            this.loseGame();
+            this.fightingEnemy = null;
         }
 
         this.crowdManager.updateParticles(delta);
