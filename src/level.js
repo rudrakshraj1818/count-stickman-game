@@ -58,8 +58,8 @@ export class LevelGenerator {
 
     generate(level, trackLength) {
         this.createTrack(trackLength);
-        this.createCollectibles(level, trackLength);
         this.createObstacles(level, trackLength);
+        this.createCollectibles(level, trackLength);
         this.createEnemies(level, trackLength);
         this.createBoss(level, trackLength);
         this.createDecorations(trackLength);
@@ -518,10 +518,25 @@ export class LevelGenerator {
                     this.spawnHealthPickup(laneIndex, z, LANE_WIDTH);
                 }
             } else {
-                // Trail of 3 golden coins neatly placed along this lane
+                // Trail of 3 golden coins neatly placed along this lane, arcing over low obstacles or guiding around tall ones
                 for (let c = 0; c < 3; c++) {
                     const coinZ = z + (c - 1) * 1.6;
-                    this.spawnCoin(laneIndex, coinZ, LANE_WIDTH);
+                    let targetLane = laneIndex;
+                    let coinY = 0.85;
+
+                    const nearbyObs = this.obstacles ? this.obstacles.find(o => Math.abs(o.z - coinZ) < 2.2 && o.laneIndex === laneIndex) : null;
+                    if (nearbyObs) {
+                        if (nearbyObs.obstacleType === 'low') {
+                            // Classic runner jump arc reward
+                            coinY = (c === 1) ? 1.75 : 1.3;
+                        } else if (nearbyObs.obstacleType === 'tall') {
+                            // Guide to open adjacent lane
+                            targetLane = (laneIndex === 0) ? 1 : 0;
+                        } else if (nearbyObs.obstacleType === 'high') {
+                            coinY = 0.55;
+                        }
+                    }
+                    this.spawnCoin(targetLane, coinZ, LANE_WIDTH, coinY);
                 }
             }
 
@@ -530,13 +545,13 @@ export class LevelGenerator {
                 const altLane = (laneIndex === 0) ? -1 : 0;
                 for (let c = 0; c < 3; c++) {
                     const coinZ = z + (c - 1) * 1.6;
-                    this.spawnCoin(altLane, coinZ, LANE_WIDTH);
+                    this.spawnCoin(altLane, coinZ, LANE_WIDTH, 0.85);
                 }
             }
         }
     }
 
-    spawnCoin(laneIndex, z, laneWidth = 2.25) {
+    spawnCoin(laneIndex, z, laneWidth = 2.25, coinY = 0.85) {
         const group = new THREE.Group();
         const laneX = laneIndex * laneWidth;
         const cx = this.getPathCenterX(z);
@@ -572,7 +587,7 @@ export class LevelGenerator {
         star.rotation.z = Math.PI / 4;
         group.add(star);
 
-        group.position.set(worldX, 0.85, worldZ);
+        group.position.set(worldX, coinY, worldZ);
         group.rotation.y = angle;
         group.userData.dynamic = true;
         this.scene.add(group);
@@ -583,6 +598,7 @@ export class LevelGenerator {
             laneIndex: laneIndex,
             laneX: laneX,
             x: worldX,
+            y: coinY,
             z: z,
             mesh: group,
             collected: false,
@@ -701,98 +717,275 @@ export class LevelGenerator {
         });
     }
 
-    // Creates authentic temple obstacles categorized by avoidance mechanic:
-    // 1. 'low': Jump over or change lane (fallen pillars, low altars, spike traps)
-    // 2. 'high': Crouch/slide under or change lane (overhead arch beams, hanging ruins)
-    // 3. 'tall': Cannot jump or slide under, MUST change lane (solid monoliths, tall rock piles)
+    // Creates authentic mobile endless runner obstacles categorized by action:
+    // 1. 'low'  → JUMP over (Fallen logs, ancient stone pillars, altars, spike traps)
+    // 2. 'high' → SLIDE under (Overhead canopy branches, collapsed arch lintels)
+    // 3. 'tall' → SWITCH LANE (Towering basalt monoliths, giant cracked boulder piles)
     createObstacles(level, trackLength) {
         this.obstacles = [];
-        const count = 10 + level * 2;
-        const enemyZones = [50, 95, 140, 185]; // Avoid enemy zones
         const LANE_WIDTH = 2.25;
+        const width = 1.95;
 
-        for (let i = 0; i < count; i++) {
-            let z;
-            let attempts = 0;
-            do {
-                z = 24 + (i / count) * (trackLength - 50) + (Math.random() - 0.5) * 6;
-                attempts++;
-            } while (enemyZones.some(ez => Math.abs(ez - z) < 9) && attempts < 40);
+        // Collect enemy encounter zones to prevent spawning obstacles on top of combat
+        const enemyCount = 2 + Math.floor(level * 0.5);
+        const enemySpacing = (trackLength - 60) / (enemyCount + 1);
+        const enemyZones = [];
+        for (let i = 0; i < enemyCount; i++) {
+            enemyZones.push(50 + (i + 1) * enemySpacing);
+        }
 
-            if (attempts >= 40) continue;
+        const isNearEnemy = (z) => enemyZones.some(ez => Math.abs(ez - z) < 10);
 
+        // ========================================================
+        // 1. TUTORIAL / INTRO SECTION: Teach the 3 mechanics one by one!
+        // ========================================================
+        // Obstacle 1: LOW (JUMP) at z = 34 on Center Lane (0)
+        if (!isNearEnemy(34)) {
+            const z = 34;
+            const laneIndex = 0;
             const cx = this.getPathCenterX(z);
             const angle = this.getPathTangentAngle ? this.getPathTangentAngle(z) : 0;
-            const cosA = Math.cos(angle);
-            const sinA = Math.sin(angle);
-
-            const laneIndices = [-1, 0, 1];
-            const laneIndex = laneIndices[(i * 2 + 1) % 3];
-            const laneX = laneIndex * LANE_WIDTH;
-            const worldX = cx + laneX * cosA;
-            const worldZ = z - laneX * sinA;
-            const width = 1.85;
-
-            const typeIndex = i % 6;
-            let obstacleType = 'low';
-
-            if (typeIndex === 0) {
-                obstacleType = 'low';
-                this.createFallenPillarObstacle(worldX, worldZ, width, angle);
-            } else if (typeIndex === 1) {
-                obstacleType = 'high';
-                this.createOverheadBeamObstacle(worldX, worldZ, width, angle);
-            } else if (typeIndex === 2) {
-                obstacleType = 'tall';
-                this.createMonolithObstacle(worldX, worldZ, width, angle);
-            } else if (typeIndex === 3) {
-                obstacleType = 'low';
-                this.createSpikeTrapObstacle(worldX, worldZ, width, angle);
-            } else if (typeIndex === 4) {
-                obstacleType = 'high';
-                this.createArchDebrisObstacle(worldX, worldZ, width, angle);
-            } else {
-                obstacleType = 'low';
-                this.createAltarBarrierObstacle(worldX, worldZ, width, angle);
-            }
-
+            const worldX = cx + laneIndex * LANE_WIDTH * Math.cos(angle);
+            const worldZ = z - laneIndex * LANE_WIDTH * Math.sin(angle);
+            this.createFallenLogObstacle(worldX, worldZ, width, angle, true);
             this.obstacles.push({
-                laneIndex: laneIndex,
-                laneX: laneX,
-                x: laneX,
-                worldX: worldX,
-                z: z,
-                width: width,
-                obstacleType: obstacleType,
+                laneIndex,
+                laneX: laneIndex * LANE_WIDTH,
+                worldX,
+                z,
+                width,
+                obstacleType: 'low',
                 passed: false,
                 avoided: false
             });
         }
+
+        // Obstacle 2: HIGH (SLIDE) at z = 54 on Center Lane (0)
+        if (!isNearEnemy(54)) {
+            const z = 54;
+            const laneIndex = 0;
+            const cx = this.getPathCenterX(z);
+            const angle = this.getPathTangentAngle ? this.getPathTangentAngle(z) : 0;
+            const worldX = cx + laneIndex * LANE_WIDTH * Math.cos(angle);
+            const worldZ = z - laneIndex * LANE_WIDTH * Math.sin(angle);
+            this.createOverheadBeamObstacle(worldX, worldZ, width, angle, true);
+            this.obstacles.push({
+                laneIndex,
+                laneX: laneIndex * LANE_WIDTH,
+                worldX,
+                z,
+                width,
+                obstacleType: 'high',
+                passed: false,
+                avoided: false
+            });
+        }
+
+        // Obstacle 3: TALL (CHANGE LANE) at z = 74 on Center Lane (0)
+        if (!isNearEnemy(74)) {
+            const z = 74;
+            const laneIndex = 0;
+            const cx = this.getPathCenterX(z);
+            const angle = this.getPathTangentAngle ? this.getPathTangentAngle(z) : 0;
+            const worldX = cx + laneIndex * LANE_WIDTH * Math.cos(angle);
+            const worldZ = z - laneIndex * LANE_WIDTH * Math.sin(angle);
+            this.createMonolithObstacle(worldX, worldZ, width, angle, true);
+            this.obstacles.push({
+                laneIndex,
+                laneX: laneIndex * LANE_WIDTH,
+                worldX,
+                z,
+                width,
+                obstacleType: 'tall',
+                passed: false,
+                avoided: false
+            });
+        }
+
+        // ========================================================
+        // 2. PROGRESSIVE MID & LATE SECTION (Gradual ramp)
+        // ========================================================
+        const startZ = 104;
+        const endZ = trackLength - 22;
+        let currentZ = startZ;
+        let stepIndex = 0;
+
+        const obstaclePool = [
+            { type: 'low', builder: 'createAltarBarrierObstacle' },
+            { type: 'high', builder: 'createArchDebrisObstacle' },
+            { type: 'tall', builder: 'createCrackedBoulderObstacle' },
+            { type: 'low', builder: 'createFallenPillarObstacle' },
+            { type: 'high', builder: 'createOverheadBeamObstacle' },
+            { type: 'low', builder: 'createSpikeTrapObstacle' },
+            { type: 'tall', builder: 'createMonolithObstacle' },
+            { type: 'low', builder: 'createFallenLogObstacle' }
+        ];
+
+        while (currentZ < endZ) {
+            // Distance between obstacles tightens as player runs farther (from 19m down to 14m)
+            const progress = (currentZ - startZ) / (endZ - startZ);
+            const spacing = 19 - progress * 5 + (Math.random() - 0.5) * 2;
+            currentZ += spacing;
+
+            if (currentZ >= endZ) break;
+            if (isNearEnemy(currentZ)) continue;
+
+            const poolItem = obstaclePool[stepIndex % obstaclePool.length];
+            const laneChoices = [-1, 0, 1];
+            // Alternating lane distribution to ensure variety and fairness
+            const laneIndex = laneChoices[(stepIndex * 2 + 1) % 3];
+
+            const cx = this.getPathCenterX(currentZ);
+            const angle = this.getPathTangentAngle ? this.getPathTangentAngle(currentZ) : 0;
+            const worldX = cx + laneIndex * LANE_WIDTH * Math.cos(angle);
+            const worldZ = currentZ - laneIndex * LANE_WIDTH * Math.sin(angle);
+
+            this[poolItem.builder](worldX, worldZ, width, angle, false);
+
+            this.obstacles.push({
+                laneIndex,
+                laneX: laneIndex * LANE_WIDTH,
+                worldX,
+                z: currentZ,
+                width,
+                obstacleType: poolItem.type,
+                passed: false,
+                avoided: false
+            });
+
+            // On higher levels (level >= 2) in the final 30% of the track, add occasional dual-lane challenge
+            if (level >= 2 && progress > 0.65 && (stepIndex % 4 === 0)) {
+                const altLane = (laneIndex === 0) ? -1 : 0;
+                const altWorldX = cx + altLane * LANE_WIDTH * Math.cos(angle);
+                const altWorldZ = currentZ - altLane * LANE_WIDTH * Math.sin(angle);
+                this.createMonolithObstacle(altWorldX, altWorldZ, width, angle, false);
+                this.obstacles.push({
+                    laneIndex: altLane,
+                    laneX: altLane * LANE_WIDTH,
+                    worldX: altWorldX,
+                    z: currentZ,
+                    width,
+                    obstacleType: 'tall',
+                    passed: false,
+                    avoided: false
+                });
+            }
+
+            stepIndex++;
+        }
     }
 
-    // LOW OBSTACLE: Broken fluted pillar cylinder lying along the road (Jump to avoid)
-    createFallenPillarObstacle(x, z, width, angle = 0) {
+    // Helper: Floating high-contrast indicator badge above obstacles
+    createFloatingGlyph(text, color, borderColor, y = 1.25) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 96;
+        const ctx = canvas.getContext('2d');
+        
+        ctx.fillStyle = 'rgba(10, 15, 25, 0.9)';
+        ctx.beginPath();
+        ctx.roundRect(8, 8, 240, 80, 20);
+        ctx.fill();
+        ctx.strokeStyle = borderColor;
+        ctx.lineWidth = 5;
+        ctx.stroke();
+
+        ctx.fillStyle = color;
+        ctx.font = '900 36px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = borderColor;
+        ctx.shadowBlur = 12;
+        ctx.fillText(text, 128, 48);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        const glyphGeo = new THREE.PlaneGeometry(1.6, 0.6);
+        const glyphMat = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide });
+        const glyph = new THREE.Mesh(glyphGeo, glyphMat);
+        glyph.position.y = y;
+        return glyph;
+    }
+
+    // LOW OBSTACLE: Gnarled fallen jungle trunk (Action: JUMP)
+    createFallenLogObstacle(x, z, width, angle = 0, hasHint = false) {
+        const group = new THREE.Group();
+        const barkMat = new THREE.MeshStandardMaterial({ color: 0x4a3319, roughness: 0.9 });
+        const mossMat = new THREE.MeshStandardMaterial({ color: 0x2e7d32, roughness: 0.85 });
+        const jumpGlowMat = new THREE.MeshStandardMaterial({
+            color: 0x00f0ff,
+            emissive: 0x00f0ff,
+            emissiveIntensity: 0.8
+        });
+
+        // Main fallen trunk cylinder lying horizontally across the lane
+        const logGeo = new THREE.CylinderGeometry(0.28, 0.34, width * 0.92, 8);
+        const log = new THREE.Mesh(logGeo, barkMat);
+        log.rotation.z = Math.PI / 2;
+        log.position.y = 0.28;
+        log.castShadow = true;
+        group.add(log);
+
+        // Moss clumps on top of the log
+        for (let i = 0; i < 3; i++) {
+            const mossGeo = new THREE.DodecahedronGeometry(0.16, 0);
+            const moss = new THREE.Mesh(mossGeo, mossMat);
+            moss.position.set((i - 1) * 0.55, 0.45, (Math.random() - 0.5) * 0.2);
+            moss.scale.set(1.4, 0.6, 1.2);
+            group.add(moss);
+        }
+
+        // Glowing cyan jump edge strip along the top
+        const edgeGeo = new THREE.BoxGeometry(width * 0.88, 0.05, 0.12);
+        const edge = new THREE.Mesh(edgeGeo, jumpGlowMat);
+        edge.position.set(0, 0.54, 0);
+        group.add(edge);
+
+        if (hasHint) {
+            const glyph = this.createFloatingGlyph('▲ JUMP', '#00f0ff', '#00e5ff', 1.25);
+            group.add(glyph);
+        }
+
+        group.position.set(x, 0, -z);
+        group.rotation.y = angle;
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+    }
+
+    // LOW OBSTACLE: Broken fluted classical stone column (Action: JUMP)
+    createFallenPillarObstacle(x, z, width, angle = 0, hasHint = false) {
         const group = new THREE.Group();
         const stoneMat = new THREE.MeshStandardMaterial({ color: 0x948067, roughness: 0.8, metalness: 0.1 });
         const crackedMat = new THREE.MeshStandardMaterial({ color: 0x6e5b46, roughness: 0.9 });
+        const amberGlow = new THREE.MeshStandardMaterial({ color: 0xffa000, emissive: 0xff8f00, emissiveIntensity: 0.7 });
 
-        const pillarGeo = new THREE.CylinderGeometry(0.32, 0.38, width, 10);
+        const pillarGeo = new THREE.CylinderGeometry(0.3, 0.36, width * 0.92, 10);
         const pillar = new THREE.Mesh(pillarGeo, stoneMat);
         pillar.rotation.z = Math.PI / 2;
-        pillar.position.y = 0.32;
+        pillar.position.y = 0.3;
         pillar.castShadow = true;
         group.add(pillar);
 
         // Cracked stone fragments
-        for (let i = 0; i < 4; i++) {
-            const chunkGeo = new THREE.DodecahedronGeometry(0.2 + Math.random() * 0.12, 0);
+        for (let i = 0; i < 3; i++) {
+            const chunkGeo = new THREE.DodecahedronGeometry(0.18 + Math.random() * 0.1, 0);
             const chunk = new THREE.Mesh(chunkGeo, crackedMat);
-            chunk.position.set((Math.random() - 0.5) * (width * 0.8), 0.16, (Math.random() - 0.5) * 0.6);
+            chunk.position.set((Math.random() - 0.5) * (width * 0.7), 0.14, (Math.random() - 0.5) * 0.5);
             chunk.rotation.set(Math.random(), Math.random(), Math.random());
             chunk.castShadow = true;
             group.add(chunk);
         }
 
+        // Amber warning jump lip
+        const lip = new THREE.Mesh(new THREE.BoxGeometry(width * 0.86, 0.05, 0.1), amberGlow);
+        lip.position.set(0, 0.56, 0);
+        group.add(lip);
+
+        if (hasHint) {
+            const glyph = this.createFloatingGlyph('▲ JUMP', '#00f0ff', '#00e5ff', 1.25);
+            group.add(glyph);
+        }
+
         group.position.set(x, 0, -z);
         group.rotation.y = angle;
         group.userData.dynamic = true;
@@ -800,22 +993,27 @@ export class LevelGenerator {
         this.meshes.push(group);
     }
 
-    // LOW OBSTACLE: Carved stone altar block with corner urns (Jump to avoid)
-    createAltarBarrierObstacle(x, z, width, angle = 0) {
+    // LOW OBSTACLE: Carved stone altar block barrier (Action: JUMP)
+    createAltarBarrierObstacle(x, z, width, angle = 0, hasHint = false) {
         const group = new THREE.Group();
         const stoneMat = new THREE.MeshStandardMaterial({ color: 0x8a7356, roughness: 0.78, metalness: 0.15 });
         const goldMat = new THREE.MeshStandardMaterial({ color: 0xd4af37, roughness: 0.4, metalness: 0.6 });
 
-        const altarGeo = new THREE.BoxGeometry(width, 0.7, 0.7);
+        const altarGeo = new THREE.BoxGeometry(width * 0.92, 0.55, 0.65);
         const altar = new THREE.Mesh(altarGeo, stoneMat);
-        altar.position.y = 0.35;
+        altar.position.y = 0.28;
         altar.castShadow = true;
         group.add(altar);
 
-        const trimGeo = new THREE.BoxGeometry(width + 0.1, 0.12, 0.8);
+        const trimGeo = new THREE.BoxGeometry(width * 0.94, 0.08, 0.72);
         const trim = new THREE.Mesh(trimGeo, goldMat);
-        trim.position.y = 0.72;
+        trim.position.y = 0.56;
         group.add(trim);
+
+        if (hasHint) {
+            const glyph = this.createFloatingGlyph('▲ JUMP', '#00f0ff', '#00e5ff', 1.25);
+            group.add(glyph);
+        }
 
         group.position.set(x, 0, -z);
         group.rotation.y = angle;
@@ -824,72 +1022,36 @@ export class LevelGenerator {
         this.meshes.push(group);
     }
 
-    // LOW OBSTACLE: Sunken spike trap in the road (Jump to avoid)
-    createSpikeTrapObstacle(x, z, width, angle = 0) {
+    // LOW OBSTACLE: Sunken spike trap in the road (Action: JUMP)
+    createSpikeTrapObstacle(x, z, width, angle = 0, hasHint = false) {
         const group = new THREE.Group();
         const plateMat = new THREE.MeshStandardMaterial({ color: 0x3d3328, roughness: 0.95 });
         const spikeMat = new THREE.MeshStandardMaterial({ color: 0x8a1c14, metalness: 0.8, roughness: 0.3 });
 
-        const grateGeo = new THREE.BoxGeometry(width, 0.1, 1.4);
+        const grateGeo = new THREE.BoxGeometry(width * 0.92, 0.08, 1.4);
         const grate = new THREE.Mesh(grateGeo, plateMat);
-        grate.position.y = 0.05;
+        grate.position.y = 0.04;
         grate.receiveShadow = true;
         group.add(grate);
 
-        const spikeCount = Math.floor(width / 0.65);
+        const spikeCount = Math.floor((width * 0.92) / 0.6);
         for (let row = -1; row <= 1; row += 2) {
             for (let col = 0; col < spikeCount; col++) {
-                const spikeGeo = new THREE.ConeGeometry(0.12, 0.55, 4);
+                const spikeGeo = new THREE.ConeGeometry(0.11, 0.45, 4);
                 const spike = new THREE.Mesh(spikeGeo, spikeMat);
                 spike.position.set(
-                    (col - (spikeCount - 1) / 2) * 0.6,
-                    0.32,
-                    row * 0.4
+                    (col - (spikeCount - 1) / 2) * 0.55,
+                    0.28,
+                    row * 0.38
                 );
                 spike.castShadow = true;
                 group.add(spike);
             }
         }
 
-        group.position.set(x, 0, -z);
-        group.rotation.y = angle;
-        group.userData.dynamic = true;
-        this.scene.add(group);
-        this.meshes.push(group);
-    }
-
-    // HIGH OBSTACLE: Overhead broken stone lintel beam suspended across the lane (Slide under to avoid)
-    createOverheadBeamObstacle(x, z, width, angle = 0) {
-        const group = new THREE.Group();
-        const stoneMat = new THREE.MeshStandardMaterial({ color: 0x7a654e, roughness: 0.82 });
-        const woodMat = new THREE.MeshStandardMaterial({ color: 0x4a3728, roughness: 0.9 });
-        const vineMat = new THREE.MeshStandardMaterial({ color: 0x2e6930, roughness: 0.95 });
-
-        // Left & right supporting ruined wooden/stone stanchions
-        const postGeo = new THREE.CylinderGeometry(0.16, 0.2, 2.5, 8);
-        const leftPost = new THREE.Mesh(postGeo, stoneMat);
-        leftPost.position.set(-width / 2 + 0.15, 1.25, 0);
-        leftPost.castShadow = true;
-        group.add(leftPost);
-
-        const rightPost = new THREE.Mesh(postGeo, stoneMat);
-        rightPost.position.set(width / 2 - 0.15, 1.25, 0);
-        rightPost.castShadow = true;
-        group.add(rightPost);
-
-        // Low-hanging beam (Clearance underneath is ~1.25m: upright hero hits it, sliding clears it!)
-        const beamGeo = new THREE.BoxGeometry(width + 0.3, 0.45, 0.5);
-        const beam = new THREE.Mesh(beamGeo, woodMat);
-        beam.position.set(0, 1.6, 0);
-        beam.castShadow = true;
-        group.add(beam);
-
-        // Hanging ancient temple vines dangling from beam
-        for (let i = 0; i < 4; i++) {
-            const vineGeo = new THREE.CylinderGeometry(0.04, 0.02, 0.45, 6);
-            const vine = new THREE.Mesh(vineGeo, vineMat);
-            vine.position.set((i - 1.5) * 0.55, 1.25, 0.1);
-            group.add(vine);
+        if (hasHint) {
+            const glyph = this.createFloatingGlyph('▲ JUMP', '#00f0ff', '#00e5ff', 1.2);
+            group.add(glyph);
         }
 
         group.position.set(x, 0, -z);
@@ -899,34 +1061,50 @@ export class LevelGenerator {
         this.meshes.push(group);
     }
 
-    // HIGH OBSTACLE: Collapsed hanging arch lintel (Slide under to avoid)
-    createArchDebrisObstacle(x, z, width, angle = 0) {
+    // HIGH OBSTACLE: Overhead canopy branch / beam with clear headroom underneath (Action: SLIDE)
+    createOverheadBeamObstacle(x, z, width, angle = 0, hasHint = false) {
         const group = new THREE.Group();
-        const stoneMat = new THREE.MeshStandardMaterial({ color: 0x7e6952, roughness: 0.82 });
-        const reliefMat = new THREE.MeshStandardMaterial({ color: 0xb59955, roughness: 0.5, metalness: 0.5 });
+        const stoneMat = new THREE.MeshStandardMaterial({ color: 0x7a654e, roughness: 0.82 });
+        const woodMat = new THREE.MeshStandardMaterial({ color: 0x4a3728, roughness: 0.9 });
+        const vineMat = new THREE.MeshStandardMaterial({ color: 0x2e6930, roughness: 0.95 });
+        const slideGlow = new THREE.MeshStandardMaterial({ color: 0x00e676, emissive: 0x00c853, emissiveIntensity: 0.8 });
 
-        // Arch pillars on sides
-        const pillarGeo = new THREE.BoxGeometry(0.35, 2.4, 0.45);
-        const leftP = new THREE.Mesh(pillarGeo, stoneMat);
-        leftP.position.set(-width / 2 + 0.15, 1.2, 0);
-        group.add(leftP);
+        // Left & right supporting stanchions on lane edges (leaving full 1.4m clearance underneath)
+        const postGeo = new THREE.CylinderGeometry(0.12, 0.16, 2.4, 6);
+        const leftPost = new THREE.Mesh(postGeo, stoneMat);
+        leftPost.position.set(-width / 2 + 0.1, 1.2, 0);
+        leftPost.castShadow = true;
+        group.add(leftPost);
 
-        const rightP = new THREE.Mesh(pillarGeo, stoneMat);
-        rightP.position.set(width / 2 - 0.15, 1.2, 0);
-        group.add(rightP);
+        const rightPost = new THREE.Mesh(postGeo, stoneMat);
+        rightPost.position.set(width / 2 - 0.1, 1.2, 0);
+        rightPost.castShadow = true;
+        group.add(rightPost);
 
-        // Overhead lintel beam positioned at chest/head level (Slide underneath!)
-        const lintelGeo = new THREE.BoxGeometry(width + 0.2, 0.5, 0.6);
-        const lintel = new THREE.Mesh(lintelGeo, stoneMat);
-        lintel.position.set(0, 1.55, 0);
-        lintel.castShadow = true;
-        group.add(lintel);
+        // Low-hanging beam at y = 1.62m (bottom is at 1.41m: upright hero hits it, sliding clears it!)
+        const beamGeo = new THREE.BoxGeometry(width + 0.1, 0.42, 0.45);
+        const beam = new THREE.Mesh(beamGeo, woodMat);
+        beam.position.set(0, 1.62, 0);
+        beam.castShadow = true;
+        group.add(beam);
 
-        // Carved rune crest on lintel
-        const crestGeo = new THREE.BoxGeometry(0.6, 0.35, 0.65);
-        const crest = new THREE.Mesh(crestGeo, reliefMat);
-        crest.position.set(0, 1.55, 0);
-        group.add(crest);
+        // Glowing green slide chevron marker on beam face
+        const chevron = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.28), slideGlow);
+        chevron.position.set(0, 1.62, 0.24);
+        group.add(chevron);
+
+        // Hanging ancient temple vines dangling to y = 1.35m
+        for (let i = 0; i < 4; i++) {
+            const vineGeo = new THREE.CylinderGeometry(0.03, 0.02, 0.35, 4);
+            const vine = new THREE.Mesh(vineGeo, vineMat);
+            vine.position.set((i - 1.5) * 0.45, 1.35, 0.1);
+            group.add(vine);
+        }
+
+        if (hasHint) {
+            const glyph = this.createFloatingGlyph('▼ SLIDE', '#00e676', '#00c853', 2.15);
+            group.add(glyph);
+        }
 
         group.position.set(x, 0, -z);
         group.rotation.y = angle;
@@ -935,10 +1113,50 @@ export class LevelGenerator {
         this.meshes.push(group);
     }
 
-    // TALL OBSTACLE: Giant ancient stone monolith / totem obelisk (CANNOT jump or slide, MUST change lane)
-    createMonolithObstacle(x, z, width, angle = 0) {
+    // HIGH OBSTACLE: Collapsed hanging arch lintel (Action: SLIDE)
+    createArchDebrisObstacle(x, z, width, angle = 0, hasHint = false) {
         const group = new THREE.Group();
-        const stoneMat = new THREE.MeshStandardMaterial({ color: 0x5a4d3f, roughness: 0.85, metalness: 0.1 });
+        const stoneMat = new THREE.MeshStandardMaterial({ color: 0x7e6952, roughness: 0.82 });
+        const slideGlow = new THREE.MeshStandardMaterial({ color: 0x00e676, emissive: 0x00c853, emissiveIntensity: 0.8 });
+
+        // Arch pillars on sides
+        const pillarGeo = new THREE.BoxGeometry(0.28, 2.4, 0.35);
+        const leftP = new THREE.Mesh(pillarGeo, stoneMat);
+        leftP.position.set(-width / 2 + 0.1, 1.2, 0);
+        group.add(leftP);
+
+        const rightP = new THREE.Mesh(pillarGeo, stoneMat);
+        rightP.position.set(width / 2 - 0.1, 1.2, 0);
+        group.add(rightP);
+
+        // Overhead lintel beam positioned at y = 1.62m (Clearance underneath is 1.41m)
+        const lintelGeo = new THREE.BoxGeometry(width + 0.1, 0.42, 0.5);
+        const lintel = new THREE.Mesh(lintelGeo, stoneMat);
+        lintel.position.set(0, 1.62, 0);
+        lintel.castShadow = true;
+        group.add(lintel);
+
+        // Glowing slide chevron emblem
+        const crest = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.25, 0.54), slideGlow);
+        crest.position.set(0, 1.62, 0);
+        group.add(crest);
+
+        if (hasHint) {
+            const glyph = this.createFloatingGlyph('▼ SLIDE', '#00e676', '#00c853', 2.15);
+            group.add(glyph);
+        }
+
+        group.position.set(x, 0, -z);
+        group.rotation.y = angle;
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+    }
+
+    // TALL OBSTACLE: Giant ancient stone monolith (Action: CHANGE LANE)
+    createMonolithObstacle(x, z, width, angle = 0, hasHint = false) {
+        const group = new THREE.Group();
+        const stoneMat = new THREE.MeshStandardMaterial({ color: 0x3d352e, roughness: 0.85, metalness: 0.1 });
         const runeMat = new THREE.MeshStandardMaterial({ 
             color: 0xff3d00, 
             emissive: 0xff1744, 
@@ -946,25 +1164,30 @@ export class LevelGenerator {
             roughness: 0.3 
         });
 
-        // Massive solid monolith block rising 3.4m tall
-        const monolithGeo = new THREE.BoxGeometry(width * 0.82, 3.4, 1.2);
+        // Massive solid monolith block rising 3.4m tall - impossible to jump or slide through!
+        const monolithGeo = new THREE.BoxGeometry(width * 0.84, 3.4, 1.1);
         const monolith = new THREE.Mesh(monolithGeo, stoneMat);
         monolith.position.y = 1.7;
         monolith.castShadow = true;
         group.add(monolith);
 
         // Tiered stepped base
-        const baseGeo = new THREE.BoxGeometry(width * 0.95, 0.35, 1.5);
+        const baseGeo = new THREE.BoxGeometry(width * 0.94, 0.35, 1.35);
         const base = new THREE.Mesh(baseGeo, stoneMat);
         base.position.y = 0.18;
         base.castShadow = true;
         group.add(base);
 
         // Glowing menacing ancient carved rune sigil
-        const runeGeo = new THREE.BoxGeometry(0.5, 0.9, 0.08);
+        const runeGeo = new THREE.BoxGeometry(0.45, 0.8, 0.08);
         const rune = new THREE.Mesh(runeGeo, runeMat);
-        rune.position.set(0, 2.0, 0.62);
+        rune.position.set(0, 1.9, 0.58);
         group.add(rune);
+
+        if (hasHint) {
+            const glyph = this.createFloatingGlyph('◀ ▶ DODGE', '#ff9800', '#ffb74d', 2.8);
+            group.add(glyph);
+        }
 
         group.position.set(x, 0, -z);
         group.rotation.y = angle;
@@ -973,8 +1196,53 @@ export class LevelGenerator {
         this.meshes.push(group);
     }
 
-    createRubbleObstacle(x, z, width) {
-        this.createMonolithObstacle(x, z, width);
+    // TALL OBSTACLE: Stacked fractured granite boulders and ruined pillar pieces (Action: CHANGE LANE)
+    createCrackedBoulderObstacle(x, z, width, angle = 0, hasHint = false) {
+        const group = new THREE.Group();
+        const stoneMat = new THREE.MeshStandardMaterial({ color: 0x5a4d3f, roughness: 0.88, metalness: 0.1 });
+        const warningRune = new THREE.MeshStandardMaterial({
+            color: 0xff3d00,
+            emissive: 0xff1744,
+            emissiveIntensity: 0.9
+        });
+
+        // Stacked interlocking giant fractured boulders (2.7m high)
+        const b1 = new THREE.Mesh(new THREE.DodecahedronGeometry(0.8, 0), stoneMat);
+        b1.position.set(-0.25, 0.75, 0);
+        b1.scale.set(1.1, 1.0, 0.9);
+        b1.castShadow = true;
+        group.add(b1);
+
+        const b2 = new THREE.Mesh(new THREE.DodecahedronGeometry(0.7, 0), stoneMat);
+        b2.position.set(0.28, 0.65, 0.1);
+        b2.scale.set(0.9, 0.9, 1.1);
+        b2.castShadow = true;
+        group.add(b2);
+
+        const b3 = new THREE.Mesh(new THREE.DodecahedronGeometry(0.62, 0), stoneMat);
+        b3.position.set(0.04, 1.85, -0.05);
+        b3.castShadow = true;
+        group.add(b3);
+
+        // Warning red hazard glyph
+        const sigil = new THREE.Mesh(new THREE.OctahedronGeometry(0.22, 0), warningRune);
+        sigil.position.set(0, 1.5, 0.62);
+        group.add(sigil);
+
+        if (hasHint) {
+            const glyph = this.createFloatingGlyph('◀ ▶ DODGE', '#ff9800', '#ffb74d', 2.7);
+            group.add(glyph);
+        }
+
+        group.position.set(x, 0, -z);
+        group.rotation.y = angle;
+        group.userData.dynamic = true;
+        this.scene.add(group);
+        this.meshes.push(group);
+    }
+
+    createRubbleObstacle(x, z, width, angle = 0) {
+        this.createCrackedBoulderObstacle(x, z, width, angle);
     }
 
 

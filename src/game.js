@@ -707,30 +707,45 @@ export class Game {
 
         for (const obs of obstacles) {
             if (obs.passed) continue;
+
+            // If player is already past the obstacle, mark as passed/avoided so it cannot hit from behind
+            if (this.trackZ > obs.z + 1.25) {
+                obs.passed = true;
+                obs.avoided = true;
+                continue;
+            }
+
             const dz = Math.abs(this.trackZ - obs.z);
 
-            if (dz < 1.35) {
+            // Longitudinal collision window: active within 1.25m of obstacle
+            if (dz < 1.25) {
+                // Check if hero is in the same lane as the obstacle
                 const inLane = (obs.laneX !== undefined)
-                    ? Math.abs(this.playerX - obs.laneX) < 0.9
-                    : Math.abs(heroWorldX - obs.worldX) < (obs.width / 2 + 0.15);
+                    ? Math.abs(this.playerX - obs.laneX) < 0.88
+                    : Math.abs(heroWorldX - obs.worldX) < (obs.width / 2 + 0.1);
 
-                if (!inLane) continue;
+                if (!inLane) {
+                    // Hero is in a different lane - dodged successfully without contact!
+                    continue;
+                }
 
                 if (obs.obstacleType === 'low') {
                     // LOW OBSTACLE: Jump over to avoid!
-                    if (this.jumpY > 0.72) {
+                    // Forgiving jump threshold: jumpY > 0.40m (hero apex is ~1.8m)
+                    if (this.jumpY > 0.40) {
                         obs.passed = true;
                         obs.avoided = true;
-                        this.ui.showFloatingText('JUMP! 🦘', '#00f0ff');
-                        const sparkPos = new THREE.Vector3(heroWorldX, 0.5, -this.trackZ);
+                        this.ui.showFloatingText('PERFECT JUMP! 🦘', '#00f0ff');
+                        this.addHeroXP(10);
+                        const sparkPos = new THREE.Vector3(heroWorldX, 0.6, -this.trackZ);
                         this.crowdManager.spawnSparks(sparkPos, 0x00f0ff, 6);
                     } else {
-                        // Failed to jump: collision!
+                        // Failed to jump or didn't jump in time: trip!
                         obs.passed = true;
-                        this.damageHero(25);
+                        this.damageHero(15);
                         this.audio.playHit();
-                        this.ui.screenShake(10);
-                        this.ui.showFloatingText('TRIP! -25 HP', '#ff5722');
+                        this.ui.screenShake(8);
+                        this.ui.showFloatingText('TRIP! -15 HP', '#ff5722');
                         this.crowdManager.triggerStumble();
                     }
                 } else if (obs.obstacleType === 'high') {
@@ -738,25 +753,26 @@ export class Game {
                     if (this.isSliding) {
                         obs.passed = true;
                         obs.avoided = true;
-                        this.ui.showFloatingText('SLIDE! 💨', '#00e676');
+                        this.ui.showFloatingText('CLEAN SLIDE! 💨', '#00e676');
+                        this.addHeroXP(10);
                         const sparkPos = new THREE.Vector3(heroWorldX, 0.25, -this.trackZ);
                         this.crowdManager.spawnSparks(sparkPos, 0x00e676, 6);
                     } else {
                         // Failed to slide: head bonk!
                         obs.passed = true;
-                        this.damageHero(25);
+                        this.damageHero(15);
                         this.audio.playHit();
-                        this.ui.screenShake(10);
-                        this.ui.showFloatingText('HEAD BONK! -25 HP', '#ff1744');
+                        this.ui.screenShake(8);
+                        this.ui.showFloatingText('HEAD BONK! -15 HP', '#ff1744');
                         this.crowdManager.triggerStumble();
                     }
                 } else {
                     // TALL OBSTACLE: Solid monolith/wall - cannot jump or slide, must switch lane!
                     obs.passed = true;
-                    this.damageHero(30);
+                    this.damageHero(20);
                     this.audio.playHit();
-                    this.ui.screenShake(12);
-                    this.ui.showFloatingText('CRASH! -30 HP', '#ff1744');
+                    this.ui.screenShake(10);
+                    this.ui.showFloatingText('CRASH! -20 HP', '#ff1744');
                     this.crowdManager.triggerStumble();
                 }
             }
